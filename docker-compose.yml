@@ -1,0 +1,83 @@
+services:
+  opencode-ai:
+    build:
+      context: .
+      dockerfile: ./dockerfile
+    image: opencode-ai:latest
+    container_name: opencode-ai
+    ports:
+      - "4096:4096"
+    volumes:
+      - opencode_data:/root
+      - ./ssh:/root/.ssh:ro
+    environment:
+      - HTTP_PROXY=http://mihomo:7890
+      - HTTPS_PROXY=http://mihomo:7890
+      - ALL_PROXY=socks5://mihomo:7890
+      - http_proxy=http://mihomo:7890
+      - https_proxy=http://mihomo:7890
+      - all_proxy=socks5://mihomo:7890
+    networks:
+      - agent-network
+    restart: always
+
+  wetty:
+    container_name: wetty
+    image: wettyoss/wetty:latest
+    ports:
+      - "8082:3000"
+    depends_on:
+      - opencode-ai
+    volumes:
+      - ./ssh/id_ed25519:/root/.ssh/id_ed25519:ro
+    command: --host 0.0.0.0 --port 3000 --allow-iframe --command "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@opencode-ai"
+    networks:
+      - agent-network
+    restart: always
+
+  mihomo:
+    container_name: mihomo
+    image: yilee01/mihomo-yacd:latest
+    ports:
+      - 8080:8080
+    volumes:
+      - ./mihomo/:/root/.config/mihomo/
+    networks:
+      - agent-network
+    restart: always
+
+  file-manager:
+    container_name: file-manager
+    image: filebrowser/filebrowser:latest
+    ports:
+      - "8081:80"
+    user: "0:0"
+    environment:
+      - FB_NOAUTH=true
+    volumes:
+      - opencode_data:/srv
+      - filebrowser_db:/database
+      - filebrowser_config:/config
+    networks:
+      - agent-network
+    restart: always
+
+  portal:
+    container_name: portal
+    image: docker.m.daocloud.io/library/nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./portal:/usr/share/nginx/html
+    networks:
+      - agent-network
+    restart: always
+
+networks:
+  agent-network:
+    driver: bridge
+
+volumes:
+  filebrowser_db:
+  filebrowser_config:
+  opencode_data:

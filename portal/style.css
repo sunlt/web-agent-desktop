@@ -1,0 +1,382 @@
+:root {
+  --bg-deep: #0b0f14;
+  --bg-soft: #151c26;
+  --glass: rgba(15, 23, 34, 0.72);
+  --glass-strong: rgba(9, 12, 18, 0.82);
+  --border: rgba(255, 255, 255, 0.12);
+  --accent: #f97316;
+  --accent-2: #14b8a6;
+  --text: #f5f7fb;
+  --muted: rgba(245, 247, 251, 0.7);
+  --taskbar-height: 52px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font-family: "Space Grotesk", "Sora", "Manrope", "Helvetica Neue", sans-serif;
+  color: var(--text);
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+body {
+  position: relative;
+}
+
+#desktop {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  background: radial-gradient(
+      circle at 15% 15%,
+      rgba(249, 115, 22, 0.25),
+      transparent 45%
+    ),
+    radial-gradient(
+      circle at 85% 35%,
+      rgba(20, 184, 166, 0.18),
+      transparent 50%
+    ),
+    linear-gradient(160deg, rgba(15, 18, 28, 0.92), rgba(8, 9, 14, 0.95));
+  overflow: hidden;
+}
+
+#desktop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("wallpaper.jpeg") center/cover no-repeat;
+  opacity: 0.45;
+  filter: saturate(1.2) brightness(0.9);
+  z-index: 0;
+}
+
+#desktop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    rgba(10, 12, 17, 0.55),
+    rgba(10, 12, 17, 0.25)
+  );
+  z-index: 0;
+}
+
+.glow {
+  position: absolute;
+  width: 360px;
+  height: 360px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(249, 115, 22, 0.18),
+    transparent 65%
+  );
+  filter: blur(18px);
+  z-index: 1;
+  opacity: 0.7;
+  animation: drift 18s ease-in-out infinite;
+}
+
+.glow.secondary {
+  width: 420px;
+  height: 420px;
+  background: radial-gradient(circle, rgba(20, 184, 166, 0.2), transparent 68%);
+  top: 55%;
+  left: 65%;
+  animation-delay: -6s;
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate(-20px, -10px);
+  }
+  50% {
+    transform: translate(30px, 20px);
+  }
+}
+
+.winbox {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  background: rgba(12, 15, 22, 0.92);
+}
+
+.winbox .wb-header {
+  height: 32px;
+  line-height: 32px;
+}
+
+.winbox .wb-title {
+  font-family: "Space Grotesk", "Sora", "Manrope", "Helvetica Neue", sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.2px;
+}
+
+.winbox .wb-body {
+  background: #0b0f14;
+}
+
+.winbox .wb-control * {
+  opacity: 0.85;
+}
+
+.winbox .wb-control *:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.winbox .wb-close:hover {
+  background-color: rgba(239, 68, 68, 0.75);
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+#taskbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--taskbar-height);
+  background: rgba(12, 15, 22, 0.88);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(18px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: 10000;
+}
+
+#taskbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+#launcher {
+  width: 44px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: transparent;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+#launcher::before {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--text);
+  border-radius: 2px;
+  box-shadow: 10px 0 0 var(--text), 0 10px 0 var(--text),
+    10px 10px 0 var(--text);
+}
+
+#launcher:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+#taskbar-apps {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  max-width: 70vw;
+  padding-bottom: 2px;
+}
+
+.taskbar-app {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.taskbar-app::after {
+  content: "";
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  width: 0;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.35);
+  transform: translateX(-50%);
+  transition: width 0.15s ease, background 0.15s ease;
+}
+
+.taskbar-app.active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.taskbar-app.active::after {
+  width: 60%;
+  background: var(--accent);
+}
+
+.taskbar-app.minimized {
+  opacity: 0.6;
+}
+
+.taskbar-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+.taskbar-label {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#taskbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+#clock {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+}
+
+#app-drawer {
+  position: absolute;
+  left: 16px;
+  bottom: calc(var(--taskbar-height) + 18px);
+  width: min(420px, 90vw);
+  background: rgba(12, 14, 20, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  display: none;
+  z-index: 9999;
+  animation: pop 0.35s ease both;
+}
+
+#app-drawer.open {
+  display: block;
+}
+
+.drawer-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+.app-list {
+  display: grid;
+  gap: 10px;
+}
+
+.app-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.app-card .thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: #0b0f14;
+}
+
+.app-meta {
+  flex: 1;
+}
+
+.app-meta h4 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.app-meta p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.open-btn {
+  border: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.open-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.title-link {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  color: var(--muted);
+  transition: color 0.2s;
+  text-decoration: none;
+}
+
+.title-link:hover {
+  color: var(--accent);
+}
+
+.wb-external {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
