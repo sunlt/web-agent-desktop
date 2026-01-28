@@ -18,7 +18,7 @@ const apps = [
   {
     id: "file-manager",
     name: "File Manager",
-    url: "http://localhost:8081",
+    url: "/file-manager/",
     desc: "Filebrowser service",
     color: "linear-gradient(140deg, #22c55e, #16a34a)",
     badge: "FM",

@@ -54,6 +54,14 @@ services:
     user: "0:0"
     environment:
       - FB_NOAUTH=true
+      - FB_BASEURL=/file-manager
+    command:
+      - --address=0.0.0.0
+      - --port=80
+      - --root=/srv
+      - --database=/database/filebrowser.db
+      - --config=/config/settings.json
+      - --baseurl=/file-manager
     volumes:
       - opencode_data:/srv
       - filebrowser_db:/database
@@ -69,6 +77,7 @@ services:
       - "80:80"
     volumes:
       - ./portal:/usr/share/nginx/html
+      - ./portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - agent-network
     restart: always
