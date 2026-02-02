@@ -325,7 +325,7 @@ function init() {
   });
 
   updateClock();
-  setInterval(updateClock, 30000);
+  setInterval(updateClock, 300);
 
   setTimeout(() => {
     wm.notifications.show(
