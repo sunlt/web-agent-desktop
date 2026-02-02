@@ -97,11 +97,10 @@ python3 -m pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
 python3 -m pip install --no-cache-dir -U uv --break-system-packages
 
 # -----------------------
-# 5) 安装 opencode
+# 5) 安装 AI CLI 工具
 # -----------------------
-echo "Installing opencode and AI CLI tools..."
+echo "Installing AI CLI tools..."
 $SUDO npm i -g @anthropic-ai/claude-code@latest @google/gemini-cli@latest @qwen-code/qwen-code@latest @openai/codex@latest
-$SUDO npm install -g opencode-ai openclaw --registry=https://registry.npmjs.org
 
 # -----------------------
 # 6) .bashrc Proxy & Color
@@ -159,45 +158,16 @@ $SUDO tee /etc/fonts/local.conf > /dev/null <<'EOF'
 EOF
 
 # -----------------------
-# 8) 入口脚本
+# 8) 辅助脚本
 # -----------------------
-echo "Creating helper scripts..."
-
-# Start script
-$SUDO tee /usr/local/bin/start-opencode > /dev/null <<'EOF'
-#!/bin/bash
-set -e
-
-# Start cron if needed
-SUDO=""
-if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
-
-$SUDO /usr/sbin/cron
-
-# Removed: /usr/sbin/sshd
-
-echo "Starting Opencode..."
-# exec needs to replace process, but opencode might need envs?
-# Executing opencode directly is fine.
-exec opencode web --port 4096 --hostname 0.0.0.0
-EOF
-$SUDO chmod +x /usr/local/bin/start-opencode
+echo "Creating update-opencode script..."
 
 # Update script
-$SUDO tee /usr/local/bin/update-opencode > /dev/null <<'EOF'
+cat > ~/update-opencode.sh <<'EOF'
 #!/bin/bash
 set -e
-
 npm i -g @anthropic-ai/claude-code@latest @google/gemini-cli@latest @qwen-code/qwen-code@latest @openai/codex@latest
-npm install -g opencode-ai openclaw --registry=https://registry.npmjs.org
 EOF
-$SUDO chmod +x /usr/local/bin/update-opencode
+chmod +x ~/update-opencode.sh
 
-# Cron job
-$SUDO tee /etc/cron.d/opencode-update > /dev/null <<'EOF'
-# 每天 03:00 自动更新 opencode
-0 3 * * * root /usr/local/bin/update-opencode >> /var/log/opencode-update.log 2>&1
-EOF
-$SUDO chmod 0644 /etc/cron.d/opencode-update
-
-echo "Initialization complete! Run 'start-opencode' to launch the service."
+echo "Initialization complete!"
