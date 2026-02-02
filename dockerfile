@@ -41,6 +41,7 @@ RUN set -eux; \
   procps \
   pandoc nano vim chromium \
   fontconfig \
+  graphicsmagick dos2unix ffmpeg htop gettext default-mysql-client postgresql-client tree \
   fonts-noto-cjk fonts-wqy-zenhei fonts-wqy-microhei fonts-arphic-ukai fonts-arphic-uming \
   openssh-server cron \
   python3 python3-pip python3-venv \
@@ -90,7 +91,7 @@ RUN set -eux; \
 # -----------------------
 RUN set -eux; \
   npm i -g @anthropic-ai/claude-code@latest @google/gemini-cli@latest @qwen-code/qwen-code@latest @openai/codex@latest \
-  npm install -g opencode-ai --registry=https://registry.npmjs.org
+  npm install -g opencode-ai openclaw --registry=https://registry.npmjs.org
 
 # -----------------------
 # -----------------------
@@ -175,7 +176,7 @@ RUN cat > /usr/local/bin/update-opencode <<'EOF'
 set -e
 
 npm i -g @anthropic-ai/claude-code@latest @google/gemini-cli@latest @qwen-code/qwen-code@latest @openai/codex@latest
-npm install -g opencode-ai --registry=https://registry.npmjs.org
+npm install -g opencode-ai openclaw --registry=https://registry.npmjs.org
 EOF
 RUN chmod +x /usr/local/bin/update-opencode
 
