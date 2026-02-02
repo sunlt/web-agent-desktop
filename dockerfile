@@ -42,11 +42,12 @@ RUN set -eux; \
   pandoc nano vim chromium \
   fontconfig \
   graphicsmagick dos2unix ffmpeg htop gettext default-mysql-client postgresql-client tree \
-  fonts-noto-cjk fonts-wqy-zenhei fonts-wqy-microhei fonts-arphic-ukai fonts-arphic-uming \
+  fonts-noto-cjk fonts-noto-color-emoji fonts-wqy-zenhei fonts-wqy-microhei fonts-arphic-ukai fonts-arphic-uming \
   openssh-server cron \
   python3 python3-pip python3-venv \
   default-jre default-jdk maven \
-  build-essential pkg-config; \
+  build-essential pkg-config \
+  texlive-xetex texlive-lang-chinese texlive-fonts-recommended; \
   ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime; \
   echo ${TZ} > /etc/timezone; \
   rm -rf /var/lib/apt/lists/*
@@ -127,6 +128,7 @@ RUN cat > /etc/fonts/local.conf <<'EOF'
       <family>AR PL UKai CN</family>
       <family>AR PL UMing CN</family>
       <family>DejaVu Sans</family>
+      <family>Noto Color Emoji</family>
     </prefer>
   </alias>
   <alias>
@@ -135,6 +137,7 @@ RUN cat > /etc/fonts/local.conf <<'EOF'
       <family>Noto Serif CJK SC</family>
       <family>AR PL UMing CN</family>
       <family>DejaVu Serif</family>
+      <family>Noto Color Emoji</family>
     </prefer>
   </alias>
   <alias>
@@ -143,6 +146,7 @@ RUN cat > /etc/fonts/local.conf <<'EOF'
       <family>Noto Sans Mono CJK SC</family>
       <family>WenQuanYi Zen Hei Mono</family>
       <family>DejaVu Sans Mono</family>
+      <family>Noto Color Emoji</family>
     </prefer>
   </alias>
 </fontconfig>
@@ -161,7 +165,7 @@ RUN set -eux; \
 # -----------------------
 # 8) 入口脚本
 # -----------------------
-RUN cat > /usr/local/bin/start-opencode <<'EOF'
+RUN cat > /usr/local/bin/start-agent-runtime <<'EOF'
 #!/bin/bash
 set -e
 
@@ -169,22 +173,22 @@ set -e
 /usr/sbin/sshd
 exec opencode web --port 4096 --hostname 0.0.0.0
 EOF
-RUN chmod +x /usr/local/bin/start-opencode
+RUN chmod +x /usr/local/bin/start-agent-runtime
 
-RUN cat > /usr/local/bin/update-opencode <<'EOF'
+RUN cat > /usr/local/bin/update-agent-runtime <<'EOF'
 #!/bin/bash
 set -e
 
 npm i -g @anthropic-ai/claude-code@latest @google/gemini-cli@latest @qwen-code/qwen-code@latest @openai/codex@latest
 npm install -g opencode-ai openclaw --registry=https://registry.npmjs.org
 EOF
-RUN chmod +x /usr/local/bin/update-opencode
+RUN chmod +x /usr/local/bin/update-agent-runtime
 
-RUN cat > /etc/cron.d/opencode-update <<'EOF'
-# 每天 03:00 自动更新 opencode
-0 3 * * * root /usr/local/bin/update-opencode >> /var/log/opencode-update.log 2>&1
+RUN cat > /etc/cron.d/agent-runtime-update <<'EOF'
+# 每天 03:00 自动更新 agent-runtime
+0 3 * * * root /usr/local/bin/update-agent-runtime >> /var/log/agent-runtime-update.log 2>&1
 EOF
-RUN chmod 0644 /etc/cron.d/opencode-update
+RUN chmod 0644 /etc/cron.d/agent-runtime-update
 
 # -----------------------
 # 9) /root 外部挂载目录
@@ -194,4 +198,4 @@ WORKDIR /root
 
 EXPOSE 4096 22
 
-CMD ["/usr/local/bin/start-opencode"]
+CMD ["/usr/local/bin/start-agent-runtime"]

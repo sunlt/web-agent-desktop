@@ -1,14 +1,14 @@
 services:
-  opencode-ai:
+  agent-runtime:
     build:
       context: .
       dockerfile: ./dockerfile
-    image: opencode-ai:latest
-    container_name: opencode-ai
+    image: agent-runtime:latest
+    container_name: agent-runtime
     ports:
       - "4096:4096"
     volumes:
-      - opencode_data:/root
+      - agent_runtime_data:/root
       - ./ssh:/root/.ssh:ro
     environment:
       - HTTP_PROXY=http://mihomo:7890
@@ -24,13 +24,11 @@ services:
   wetty:
     container_name: wetty
     image: wettyoss/wetty:latest
-    ports:
-      - "8082:3000"
     depends_on:
-      - opencode-ai
+      - agent-runtime
     volumes:
       - ./ssh/id_ed25519:/root/.ssh/id_ed25519:ro
-    command: --host 0.0.0.0 --port 3000 --allow-iframe --command "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@opencode-ai"
+    command: --host 0.0.0.0 --port 3000 --base /wetty --allow-iframe --command "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@agent-runtime"
     networks:
       - agent-network
     restart: always
@@ -38,8 +36,6 @@ services:
   mihomo:
     container_name: mihomo
     image: yilee01/mihomo-yacd:latest
-    ports:
-      - 8080:8080
     volumes:
       - ./mihomo/:/root/.config/mihomo/
     networks:
@@ -49,8 +45,6 @@ services:
   file-manager:
     container_name: file-manager
     image: filebrowser/filebrowser:latest
-    ports:
-      - "8081:80"
     user: "0:0"
     environment:
       - FB_NOAUTH=true
@@ -63,7 +57,7 @@ services:
       - --config=/config/settings.json
       - --baseurl=/file-manager
     volumes:
-      - opencode_data:/srv
+      - agent_runtime_data:/srv
       - filebrowser_db:/database
       - filebrowser_config:/config
     networks:
@@ -89,4 +83,4 @@ networks:
 volumes:
   filebrowser_db:
   filebrowser_config:
-  opencode_data:
+  agent_runtime_data:

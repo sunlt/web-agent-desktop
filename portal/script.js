@@ -3,15 +3,15 @@ const config = {
     {
       id: "webtty",
       name: "Terminal",
-      url: "http://localhost:8082/wetty",
+      url: "/wetty",
       desc: "Web Terminal",
       color: "#2563eb",
       badge: "TTY",
     },
     {
-      id: "opencode",
-      name: "IDE",
-      url: "http://localhost:4096",
+      id: "agent-runtime",
+      name: "Agent Runtime",
+      url: "http://" + window.location.hostname + ":4096",
       desc: "Code Editor",
       color: "#0891b2",
       badge: "OC",
@@ -27,7 +27,7 @@ const config = {
     {
       id: "proxy",
       name: "Proxy",
-      url: "http://localhost:8080",
+      url: "/mihomo/",
       desc: "Network Control",
       color: "#d97706",
       badge: "MH",

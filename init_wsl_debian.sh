@@ -45,11 +45,12 @@ $SUDO DEBIAN_FRONTEND=${DEBIAN_FRONTEND} apt-get install -y --no-install-recomme
     pandoc nano vim chromium \
     fontconfig \
     graphicsmagick dos2unix ffmpeg htop gettext default-mysql-client postgresql-client tree \
-    fonts-noto-cjk fonts-wqy-zenhei fonts-wqy-microhei fonts-arphic-ukai fonts-arphic-uming \
+    fonts-noto-cjk fonts-noto-color-emoji fonts-wqy-zenhei fonts-wqy-microhei fonts-arphic-ukai fonts-arphic-uming \
     cron \
     python3 python3-pip python3-venv \
     default-jre default-jdk maven \
-    build-essential pkg-config
+    build-essential pkg-config \
+    texlive-xetex texlive-lang-chinese texlive-fonts-recommended
 
 # Configure Timezone
 $SUDO ln -snf /usr/share/zoneinfo/${TZ} /etc/localtime
@@ -136,6 +137,7 @@ $SUDO tee /etc/fonts/local.conf > /dev/null <<'EOF'
       <family>AR PL UKai CN</family>
       <family>AR PL UMing CN</family>
       <family>DejaVu Sans</family>
+      <family>Noto Color Emoji</family>
     </prefer>
   </alias>
   <alias>
@@ -144,6 +146,7 @@ $SUDO tee /etc/fonts/local.conf > /dev/null <<'EOF'
       <family>Noto Serif CJK SC</family>
       <family>AR PL UMing CN</family>
       <family>DejaVu Serif</family>
+      <family>Noto Color Emoji</family>
     </prefer>
   </alias>
   <alias>
@@ -152,6 +155,7 @@ $SUDO tee /etc/fonts/local.conf > /dev/null <<'EOF'
       <family>Noto Sans Mono CJK SC</family>
       <family>WenQuanYi Zen Hei Mono</family>
       <family>DejaVu Sans Mono</family>
+      <family>Noto Color Emoji</family>
     </prefer>
   </alias>
 </fontconfig>
@@ -160,14 +164,14 @@ EOF
 # -----------------------
 # 8) 辅助脚本
 # -----------------------
-echo "Creating update-opencode script..."
+echo "Creating update-agent-runtime script..."
 
 # Update script
-cat > ~/update-opencode.sh <<'EOF'
+cat > ~/update-agent-runtime.sh <<'EOF'
 #!/bin/bash
 set -e
 npm i -g @anthropic-ai/claude-code@latest @google/gemini-cli@latest @qwen-code/qwen-code@latest @openai/codex@latest
 EOF
-chmod +x ~/update-opencode.sh
+chmod +x ~/update-agent-runtime.sh
 
 echo "Initialization complete!"
