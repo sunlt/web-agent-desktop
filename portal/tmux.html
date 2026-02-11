@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tmux 会话</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1216;
+        --panel: #1a1f26;
+        --border: #30363d;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --accent: #2563eb;
+        --danger: #e11d48;
+        --sidebar-w: 260px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        overflow: hidden;
+      }
+      #layout {
+        display: grid;
+        grid-template-columns: var(--sidebar-w) 1fr;
+        height: 100%;
+        transition: grid-template-columns 0.3s ease;
+      }
+      #layout.sidebar-collapsed {
+        --sidebar-w: 44px;
+      }
+      aside {
+        background: var(--panel);
+        border-right: 1px solid var(--border);
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        overflow-y: auto;
+        transition: padding 0.3s ease;
+      }
+      .sidebar-titlebar {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: flex-start;
+      }
+      .sidebar-main {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-height: 0;
+      }
+      h1 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+      }
+      input {
+        flex: 1;
+        background: #0b0f14;
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+      }
+      button {
+        background: var(--accent);
+        border: none;
+        color: #fff;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+      }
+      button.secondary {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text);
+      }
+      #btn-toggle-sidebar {
+        min-width: 28px;
+        height: 28px;
+        padding: 0;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      button.danger {
+        background: var(--danger);
+      }
+      #sessions {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        overflow-y: auto;
+      }
+      .session {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        gap: 6px;
+        align-items: center;
+      }
+      .session.active {
+        border-color: var(--accent);
+        background: rgba(37, 99, 235, 0.15);
+      }
+      .session-name {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .session-meta {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      main {
+        background: #000;
+        position: relative;
+      }
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        background: #000;
+      }
+      #status {
+        min-height: 16px;
+      }
+      #layout.sidebar-collapsed aside {
+        padding: 10px 8px;
+      }
+      #layout.sidebar-collapsed .sidebar-main,
+      #layout.sidebar-collapsed .sidebar-hint,
+      #layout.sidebar-collapsed .sidebar-titlebar h1 {
+        display: none;
+      }
+      #layout.sidebar-collapsed .sidebar-titlebar {
+        justify-content: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="layout">
+      <aside>
+        <div class="sidebar-titlebar">
+          <div>
+            <h1>tmux 会话</h1>
+            <div class="muted sidebar-hint">点击会话进入，快捷键无需记</div>
+          </div>
+          <button
+            id="btn-toggle-sidebar"
+            class="secondary"
+            title="收起侧边栏"
+            aria-label="收起侧边栏"
+          >
+            ◀
+          </button>
+        </div>
+        <div class="sidebar-main">
+          <div class="row">
+            <input id="name" placeholder="会话名" />
+            <button id="create">创建</button>
+          </div>
+          <div class="row">
+            <button id="refresh" class="secondary">刷新</button>
+            <button id="remove" class="danger">删除</button>
+          </div>
+          <div id="status" class="muted"></div>
+          <hr
+            style="
+              border: none;
+              border-top: 1px solid var(--border);
+              margin: 4px 0;
+            "
+          />
+          <div id="sessions"></div>
+        </div>
+      </aside>
+      <main>
+        <iframe id="terminal" title="tmux terminal"></iframe>
+      </main>
+    </div>
+
+    <script>
+      const api = "/tmux-api/sessions";
+      const sessionsEl = document.getElementById("sessions");
+      const terminal = document.getElementById("terminal");
+      const nameInput = document.getElementById("name");
+      const statusEl = document.getElementById("status");
+      const layout = document.getElementById("layout");
+      const btnToggleSidebar = document.getElementById("btn-toggle-sidebar");
+      let active = "";
+      let sidebarCollapsed = localStorage.getItem("tmux.sidebar-collapsed") === "1";
+
+      function syncSidebarState() {
+        layout.classList.toggle("sidebar-collapsed", sidebarCollapsed);
+        btnToggleSidebar.textContent = sidebarCollapsed ? "▶" : "◀";
+        btnToggleSidebar.title = sidebarCollapsed ? "展开侧边栏" : "收起侧边栏";
+      }
+
+      function setStatus(text) {
+        statusEl.textContent = text || "";
+      }
+
+      function renderSessions(list) {
+        sessionsEl.innerHTML = "";
+        if (!list.length) {
+          const empty = document.createElement("div");
+          empty.className = "muted";
+          empty.textContent = "暂无会话，请创建一个。";
+          sessionsEl.appendChild(empty);
+          return;
+        }
+        list.forEach((s) => {
+          const row = document.createElement("div");
+          row.className = "session" + (s.name === active ? " active" : "");
+          row.innerHTML = `
+            <div>
+              <div class="session-name">${s.name}</div>
+              <div class="session-meta">窗口: ${s.windows} ${s.attached ? "· 已连接" : ""}</div>
+            </div>
+            <div class="muted">进入</div>
+          `;
+          row.onclick = () => openSession(s.name);
+          sessionsEl.appendChild(row);
+        });
+      }
+
+      async function loadSessions() {
+        setStatus("加载中...");
+        try {
+          const res = await fetch(api, { cache: "no-store" });
+          const data = await res.json();
+          renderSessions(data.sessions || []);
+          setStatus("");
+        } catch {
+          setStatus("加载失败，稍后重试");
+        }
+      }
+
+      function openSession(name) {
+        active = name;
+        terminal.src = `/tty/?arg=${encodeURIComponent(name)}`;
+        loadSessions();
+      }
+
+      async function createSession() {
+        const name = nameInput.value.trim();
+        if (!name) {
+          setStatus("请输入会话名");
+          return;
+        }
+        setStatus("创建中...");
+        try {
+          const res = await fetch(api, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            setStatus(
+              data.error === "invalid_name" ? "会话名不合法" : "创建失败",
+            );
+            return;
+          }
+          nameInput.value = "";
+          openSession(name);
+        } catch {
+          setStatus("创建失败");
+        }
+      }
+
+      async function deleteSession() {
+        if (!active) {
+          setStatus("请选择要删除的会话");
+          return;
+        }
+        if (!confirm(`确认删除会话 ${active} ?`)) return;
+        setStatus("删除中...");
+        try {
+          const res = await fetch(`${api}/${encodeURIComponent(active)}`, {
+            method: "DELETE",
+          });
+          if (!res.ok) {
+            setStatus("删除失败");
+            return;
+          }
+          active = "";
+          terminal.src = "about:blank";
+          await loadSessions();
+          setStatus("");
+        } catch {
+          setStatus("删除失败");
+        }
+      }
+
+      btnToggleSidebar.onclick = () => {
+        sidebarCollapsed = !sidebarCollapsed;
+        localStorage.setItem("tmux.sidebar-collapsed", sidebarCollapsed ? "1" : "0");
+        syncSidebarState();
+      };
+
+      document.getElementById("create").onclick = createSession;
+      document.getElementById("refresh").onclick = loadSessions;
+      document.getElementById("remove").onclick = deleteSession;
+      nameInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") createSession();
+      });
+
+      syncSidebarState();
+      loadSessions();
+    </script>
+  </body>
+</html>

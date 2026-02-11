@@ -8,8 +8,8 @@ services:
     ports:
       - "4096:4096"
     volumes:
-      - agent_runtime_data:/root
-      - ./ssh:/root/.ssh:ro
+      - agent_runtime_data:/data
+      - agent_runtime_home:/root
     environment:
       - HTTP_PROXY=http://mihomo:7890
       - HTTPS_PROXY=http://mihomo:7890
@@ -17,18 +17,6 @@ services:
       - http_proxy=http://mihomo:7890
       - https_proxy=http://mihomo:7890
       - all_proxy=socks5://mihomo:7890
-    networks:
-      - agent-network
-    restart: always
-
-  wetty:
-    container_name: wetty
-    image: wettyoss/wetty:latest
-    depends_on:
-      - agent-runtime
-    volumes:
-      - ./ssh/id_ed25519:/root/.ssh/id_ed25519:ro
-    command: --host 0.0.0.0 --port 3000 --base /wetty --allow-iframe --command "ssh -i /root/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@agent-runtime"
     networks:
       - agent-network
     restart: always
@@ -57,7 +45,9 @@ services:
       - --config=/config/settings.json
       - --baseurl=/file-manager
     volumes:
-      - agent_runtime_data:/srv
+      - agent_runtime_srv:/srv
+      - agent_runtime_home:/srv/home
+      - agent_runtime_data:/srv/data
       - filebrowser_db:/database
       - filebrowser_config:/config
     networks:
@@ -84,3 +74,5 @@ volumes:
   filebrowser_db:
   filebrowser_config:
   agent_runtime_data:
+  agent_runtime_home:
+  agent_runtime_srv:

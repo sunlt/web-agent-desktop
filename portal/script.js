@@ -2,11 +2,11 @@ const config = {
   apps: [
     {
       id: "webtty",
-      name: "Terminal",
-      url: "/wetty",
-      desc: "Web Terminal",
+      name: "tmux",
+      url: "/tmux.html",
+      desc: "Session Manager",
       color: "#2563eb",
-      badge: "TTY",
+      badge: "TM",
     },
     {
       id: "agent-runtime",
@@ -107,6 +107,10 @@ class WindowManager {
     this.notifications = new NotificationManager();
   }
 
+  getWinRoot(box) {
+    return box?.window || box?.body?.closest(".winbox") || null;
+  }
+
   createWindow(app) {
     if (app.id === "market") {
       this.createMarketWindow();
@@ -130,12 +134,19 @@ class WindowManager {
       y,
       background: "var(--bg-elevated)",
       onfocus: () => this.setActive(winId),
-      onminimize: () => this.updateTaskbar(),
-      onrestore: () => this.setActive(winId),
+      onminimize: () => {
+        box.hide();
+        this.updateTaskbar();
+      },
+      onrestore: () => {
+        box.show();
+        this.setActive(winId);
+      },
       onclose: () => this.removeWindow(winId),
     });
 
-    const ctrl = box.dom.querySelector(".wb-control");
+    const winRoot = this.getWinRoot(box);
+    const ctrl = winRoot?.querySelector?.(".wb-control");
     if (ctrl) {
       const ext = document.createElement("span");
       ext.className = "wb-external";
@@ -165,7 +176,9 @@ class WindowManager {
       html: `<div class="market-grid"></div>`,
     });
 
-    const grid = box.dom.querySelector(".market-grid");
+    const winRoot = this.getWinRoot(box);
+    const grid = winRoot?.querySelector?.(".market-grid");
+    if (!grid) return;
     config.marketApps.forEach((app) => {
       const exists = config.apps.some((a) => a.id === app.id);
       const item = document.createElement("div");
@@ -214,12 +227,11 @@ class WindowManager {
     if (!win) return;
 
     if (win.box.min) {
-      win.box.restore();
-      win.box.focus();
+      win.box.show().restore().focus();
     } else if (this.activeWindowId === winId) {
       win.box.minimize();
     } else {
-      win.box.focus();
+      win.box.show().focus();
     }
   }
 
