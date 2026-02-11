@@ -66,6 +66,34 @@ services:
       - agent-network
     restart: always
 
+  pgsql:
+    container_name: pgsql
+    image: docker.m.daocloud.io/library/postgres:16-alpine
+    environment:
+      - POSTGRES_DB=app
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=app123456
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgsql_data:/var/lib/postgresql/data
+    networks:
+      - agent-network
+    restart: always
+
+  rustfs:
+    container_name: rustfs
+    image: rustfs/rustfs:latest
+    command: /data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - rustfs_data:/data
+    networks:
+      - agent-network
+    restart: always
+
 networks:
   agent-network:
     driver: bridge
@@ -76,3 +104,5 @@ volumes:
   agent_runtime_data:
   agent_runtime_home:
   agent_runtime_srv:
+  pgsql_data:
+  rustfs_data:
