@@ -134,6 +134,7 @@ export function createControlPlaneApp(
     createRunCallbacksRouter({
       callbackHandler,
       callbackRepo: callbackRepository,
+      runOrchestrator,
     }),
   );
 

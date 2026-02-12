@@ -89,6 +89,18 @@ export interface StartRunResult {
   readonly reason?: string;
 }
 
+export interface ReplyHumanLoopInput {
+  readonly runId: string;
+  readonly questionId: string;
+  readonly answer: string;
+}
+
+export interface ReplyHumanLoopResult {
+  readonly accepted: boolean;
+  readonly reason?: string;
+  readonly provider?: ProviderKind;
+}
+
 export class RunOrchestrator {
   private readonly runs = new Map<string, ActiveRunContext>();
 
@@ -282,6 +294,49 @@ export class RunOrchestrator {
       startedAt: context.startedAt,
       endedAt: context.endedAt,
       reason: context.reason,
+    };
+  }
+
+  async replyHumanLoop(input: ReplyHumanLoopInput): Promise<ReplyHumanLoopResult> {
+    const context = this.runs.get(input.runId);
+    if (!context) {
+      return {
+        accepted: false,
+        reason: "run not found",
+      };
+    }
+
+    if (
+      context.status === "succeeded" ||
+      context.status === "failed" ||
+      context.status === "canceled" ||
+      context.status === "blocked"
+    ) {
+      return {
+        accepted: false,
+        reason: `run status does not accept human-loop reply: ${context.status}`,
+        provider: context.provider,
+      };
+    }
+
+    const adapter = this.registry.get(context.provider);
+    if (!adapter.capabilities.humanLoop || !adapter.reply) {
+      return {
+        accepted: false,
+        reason: `provider ${context.provider} does not support human-loop reply`,
+        provider: context.provider,
+      };
+    }
+
+    await adapter.reply({
+      runId: input.runId,
+      questionId: input.questionId,
+      answer: input.answer,
+    });
+
+    return {
+      accepted: true,
+      provider: context.provider,
     };
   }
 }

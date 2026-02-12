@@ -6,6 +6,11 @@ export type RunStatus =
   | "waiting_human"
   | RunCompletionStatus;
 export type TodoStatus = "todo" | "doing" | "done" | "canceled";
+export type HumanLoopRequestStatus =
+  | "pending"
+  | "resolved"
+  | "canceled"
+  | "expired";
 
 export interface TodoPayload {
   readonly todoId: string;
@@ -13,6 +18,17 @@ export interface TodoPayload {
   readonly status: TodoStatus;
   readonly order: number;
   readonly updatedAt: Date;
+}
+
+export interface HumanLoopRequestRecord {
+  readonly questionId: string;
+  readonly runId: string;
+  readonly sessionId: string;
+  readonly prompt: string;
+  readonly metadata: Record<string, unknown>;
+  readonly status: HumanLoopRequestStatus;
+  readonly requestedAt: Date;
+  readonly resolvedAt: Date | null;
 }
 
 export type CallbackEvent =
@@ -124,6 +140,20 @@ export interface HumanLoopRepository {
     readonly runId: string;
     readonly resolvedAt: Date;
   }): Promise<void>;
+
+  listPendingRequests(input: {
+    readonly runId?: string;
+    readonly limit?: number;
+  }): Promise<readonly HumanLoopRequestRecord[]>;
+
+  findRequest(questionId: string): Promise<HumanLoopRequestRecord | null>;
+
+  saveResponse(input: {
+    readonly questionId: string;
+    readonly runId: string;
+    readonly answer: string;
+    readonly createdAt: Date;
+  }): Promise<{ readonly inserted: boolean }>;
 }
 
 export interface SessionSyncService {

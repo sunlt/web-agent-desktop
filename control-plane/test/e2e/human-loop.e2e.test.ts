@@ -47,6 +47,58 @@ class HumanLoopSupportedProvider implements AgentProviderAdapter {
   }
 }
 
+class HumanLoopReplyProvider implements AgentProviderAdapter {
+  readonly kind = "codex-cli" as const;
+  readonly capabilities = {
+    resume: true,
+    humanLoop: true,
+    todoStream: true,
+    buildPlanMode: false,
+  };
+  private readonly waiters = new Map<string, () => void>();
+
+  async run(input: ProviderRunInput): Promise<ProviderRunHandle> {
+    const waiters = this.waiters;
+    return {
+      stream: async function* () {
+        yield {
+          type: "message.delta" as const,
+          text: "waiting-human-reply",
+        };
+
+        await new Promise<void>((resolve) => {
+          waiters.set(input.runId, resolve);
+        });
+
+        yield {
+          type: "run.finished" as const,
+          status: "succeeded",
+        };
+      },
+      stop: async () => {
+        const resume = waiters.get(input.runId);
+        if (resume) {
+          waiters.delete(input.runId);
+          resume();
+        }
+      },
+    };
+  }
+
+  async reply(input: {
+    runId: string;
+    questionId: string;
+    answer: string;
+  }): Promise<void> {
+    const resume = this.waiters.get(input.runId);
+    if (!resume) {
+      throw new Error("run does not wait for human reply");
+    }
+    this.waiters.delete(input.runId);
+    resume();
+  }
+}
+
 describe("Human Loop E2E", () => {
   test("should return 409 when provider does not support required human-loop", async () => {
     const app = createControlPlaneApp({
@@ -109,4 +161,99 @@ describe("Human Loop E2E", () => {
       expect(body.snapshot.status).toBe("succeeded");
     });
   });
+
+  test("should list pending human-loop requests and accept reply", async () => {
+    const app = createControlPlaneApp({
+      providerAdapters: [new HumanLoopReplyProvider()],
+    });
+
+    await withHttpServer(app, async (baseUrl) => {
+      const runId = "run-human-loop-reply";
+      const startPromise = fetch(`${baseUrl}/api/runs/start`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          runId,
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          messages: [{ role: "user", content: "等待用户回复后继续" }],
+          requireHumanLoop: true,
+        }),
+      });
+
+      await sleep(30);
+
+      const bindResponse = await fetch(`${baseUrl}/api/runs/${runId}/bind`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: "sess-human-loop-reply" }),
+      });
+      expect(bindResponse.status).toBe(200);
+
+      const requested = await fetch(`${baseUrl}/api/runs/${runId}/callbacks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          eventId: "evt-human-loop-requested-1",
+          type: "human_loop.requested",
+          questionId: "q-human-loop-1",
+          prompt: "请确认是否继续",
+        }),
+      });
+      expect(requested.status).toBe(200);
+
+      const pending = await fetch(
+        `${baseUrl}/api/human-loop/pending?runId=${runId}`,
+      );
+      expect(pending.status).toBe(200);
+      const pendingBody = (await pending.json()) as {
+        total: number;
+        requests: Array<{ questionId: string; status: string }>;
+      };
+      expect(pendingBody.total).toBe(1);
+      expect(pendingBody.requests[0]).toMatchObject({
+        questionId: "q-human-loop-1",
+        status: "pending",
+      });
+
+      const reply = await fetch(`${baseUrl}/api/human-loop/reply`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          runId,
+          questionId: "q-human-loop-1",
+          answer: "继续执行",
+        }),
+      });
+      expect(reply.status).toBe(200);
+      expect(await reply.json()).toMatchObject({
+        ok: true,
+        status: "resolved",
+      });
+
+      const pendingAfterReply = await fetch(
+        `${baseUrl}/api/human-loop/pending?runId=${runId}`,
+      );
+      expect(pendingAfterReply.status).toBe(200);
+      const pendingAfterReplyBody = (await pendingAfterReply.json()) as {
+        total: number;
+      };
+      expect(pendingAfterReplyBody.total).toBe(0);
+
+      const startResponse = await startPromise;
+      expect(startResponse.status).toBe(200);
+      const startBody = (await startResponse.json()) as {
+        accepted: boolean;
+        snapshot: { status: string };
+      };
+      expect(startBody.accepted).toBe(true);
+      expect(startBody.snapshot.status).toBe("succeeded");
+    });
+  });
 });
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}

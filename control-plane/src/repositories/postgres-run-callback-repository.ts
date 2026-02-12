@@ -1,5 +1,9 @@
 import type { Pool } from "pg";
-import type { RunStatus, TodoStatus } from "../services/callback-handler.js";
+import type {
+  HumanLoopRequestRecord,
+  RunStatus,
+  TodoStatus,
+} from "../services/callback-handler.js";
 import type { RunCallbackRepository } from "./run-callback-repository.js";
 
 export class PostgresRunCallbackRepository
@@ -235,5 +239,127 @@ export class PostgresRunCallbackRepository
       `,
       [input.questionId, input.runId, input.resolvedAt],
     );
+  }
+
+  async listPendingRequests(input: {
+    runId?: string;
+    limit?: number;
+  }): Promise<readonly HumanLoopRequestRecord[]> {
+    const clauses = [`status = 'pending'`];
+    const values: unknown[] = [];
+
+    if (input.runId) {
+      values.push(input.runId);
+      clauses.push(`run_id = $${values.length}`);
+    }
+
+    let limitClause = "";
+    if (typeof input.limit === "number") {
+      values.push(input.limit);
+      limitClause = `LIMIT $${values.length}`;
+    }
+
+    const result = await this.pool.query<{
+      question_id: string;
+      run_id: string;
+      session_id: string;
+      prompt: string;
+      metadata: Record<string, unknown> | null;
+      status: HumanLoopRequestRecord["status"];
+      created_at: Date;
+      resolved_at: Date | null;
+    }>(
+      `
+        SELECT
+          question_id,
+          run_id,
+          session_id,
+          prompt,
+          metadata,
+          status,
+          created_at,
+          resolved_at
+        FROM human_loop_requests
+        WHERE ${clauses.join(" AND ")}
+        ORDER BY created_at DESC
+        ${limitClause}
+      `,
+      values,
+    );
+
+    return result.rows.map((row) => ({
+      questionId: row.question_id,
+      runId: row.run_id,
+      sessionId: row.session_id,
+      prompt: row.prompt,
+      metadata: row.metadata ?? {},
+      status: row.status,
+      requestedAt: row.created_at,
+      resolvedAt: row.resolved_at,
+    }));
+  }
+
+  async findRequest(questionId: string): Promise<HumanLoopRequestRecord | null> {
+    const result = await this.pool.query<{
+      question_id: string;
+      run_id: string;
+      session_id: string;
+      prompt: string;
+      metadata: Record<string, unknown> | null;
+      status: HumanLoopRequestRecord["status"];
+      created_at: Date;
+      resolved_at: Date | null;
+    }>(
+      `
+        SELECT
+          question_id,
+          run_id,
+          session_id,
+          prompt,
+          metadata,
+          status,
+          created_at,
+          resolved_at
+        FROM human_loop_requests
+        WHERE question_id = $1
+      `,
+      [questionId],
+    );
+
+    if ((result.rowCount ?? 0) === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      questionId: row.question_id,
+      runId: row.run_id,
+      sessionId: row.session_id,
+      prompt: row.prompt,
+      metadata: row.metadata ?? {},
+      status: row.status,
+      requestedAt: row.created_at,
+      resolvedAt: row.resolved_at,
+    };
+  }
+
+  async saveResponse(input: {
+    questionId: string;
+    runId: string;
+    answer: string;
+    createdAt: Date;
+  }): Promise<{ readonly inserted: boolean }> {
+    const result = await this.pool.query(
+      `
+        INSERT INTO human_loop_responses (question_id, run_id, answer, created_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (question_id, run_id) DO NOTHING
+      `,
+      [input.questionId, input.runId, input.answer, input.createdAt],
+    );
+
+    return {
+      inserted: (result.rowCount ?? 0) > 0,
+    };
   }
 }

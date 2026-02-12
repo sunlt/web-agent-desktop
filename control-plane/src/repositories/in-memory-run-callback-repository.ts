@@ -1,4 +1,6 @@
 import type {
+  HumanLoopRequestRecord,
+  HumanLoopRequestStatus,
   RunStatus,
   TodoStatus,
 } from "../services/callback-handler.js";
@@ -30,9 +32,16 @@ export interface InMemoryHumanLoopRequest {
   readonly sessionId: string;
   readonly prompt: string;
   readonly metadata: Record<string, unknown>;
-  readonly status: "pending" | "resolved";
+  readonly status: HumanLoopRequestStatus;
   readonly requestedAt: Date;
   readonly resolvedAt: Date | null;
+}
+
+interface InMemoryHumanLoopResponse {
+  readonly questionId: string;
+  readonly runId: string;
+  readonly answer: string;
+  readonly createdAt: Date;
 }
 
 export class InMemoryRunCallbackRepository
@@ -45,6 +54,7 @@ export class InMemoryRunCallbackRepository
   private readonly todoItems = new Map<string, InMemoryTodoItem>();
   private readonly todoEvents: InMemoryTodoEvent[] = [];
   private readonly humanLoopRequests = new Map<string, InMemoryHumanLoopRequest>();
+  private readonly humanLoopResponses = new Map<string, InMemoryHumanLoopResponse>();
 
   bindRun(runId: string, sessionId: string): void {
     this.runContexts.set(runId, { runId, sessionId });
@@ -188,7 +198,50 @@ export class InMemoryRunCallbackRepository
     });
   }
 
+  async listPendingRequests(input: {
+    runId?: string;
+    limit?: number;
+  }): Promise<readonly HumanLoopRequestRecord[]> {
+    const pending = Array.from(this.humanLoopRequests.values())
+      .filter((item) => item.status === "pending")
+      .filter((item) => (input.runId ? item.runId === input.runId : true))
+      .sort(
+        (a, b) => b.requestedAt.getTime() - a.requestedAt.getTime(),
+      );
+
+    const limit = input.limit ?? pending.length;
+    return pending.slice(0, limit);
+  }
+
+  async findRequest(questionId: string): Promise<HumanLoopRequestRecord | null> {
+    return this.humanLoopRequests.get(questionId) ?? null;
+  }
+
+  async saveResponse(input: {
+    questionId: string;
+    runId: string;
+    answer: string;
+    createdAt: Date;
+  }): Promise<{ readonly inserted: boolean }> {
+    const key = this.responseKey(input.runId, input.questionId);
+    if (this.humanLoopResponses.has(key)) {
+      return { inserted: false };
+    }
+
+    this.humanLoopResponses.set(key, {
+      questionId: input.questionId,
+      runId: input.runId,
+      answer: input.answer,
+      createdAt: input.createdAt,
+    });
+    return { inserted: true };
+  }
+
   private todoKey(runId: string, todoId: string): string {
     return `${runId}:${todoId}`;
+  }
+
+  private responseKey(runId: string, questionId: string): string {
+    return `${runId}:${questionId}`;
   }
 }
