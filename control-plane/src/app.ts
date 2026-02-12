@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import { NoopExecutorClient } from "./adapters/noop-executor-client.js";
 import { NoopDockerClient } from "./adapters/noop-docker-client.js";
 import { NoopWorkspaceSyncClient } from "./adapters/noop-workspace-sync-client.js";
+import { ExecutorManagerSessionSyncClient } from "./adapters/executor-manager-session-sync-client.js";
 import { createLogger, type Logger } from "./observability/logger.js";
 import { ClaudeCodeProviderAdapter } from "./providers/claude-code-provider.js";
 import { CodexCliProviderAdapter } from "./providers/codex-cli-provider.js";
@@ -30,7 +31,7 @@ import { createRunCallbacksRouter } from "./routes/run-callbacks.js";
 import { createReconcileRouter } from "./routes/reconcile.js";
 import { createRunsRouter } from "./routes/runs.js";
 import { createSessionWorkersRouter } from "./routes/session-workers.js";
-import { CallbackHandler } from "./services/callback-handler.js";
+import { CallbackHandler, type SessionSyncService } from "./services/callback-handler.js";
 import { LifecycleManager } from "./services/lifecycle-manager.js";
 import type { DrainQueueInput } from "./services/run-queue-manager.js";
 import { RunQueueManager } from "./services/run-queue-manager.js";
@@ -54,6 +55,8 @@ export interface CreateControlPlaneAppOptions {
   readonly chatHistoryRepository?: ChatHistoryRepository;
   readonly rbacRepository?: RbacRepository;
   readonly fileBrowser?: FileBrowser;
+  readonly sessionSyncService?: SessionSyncService;
+  readonly enableSessionWorkersRouter?: boolean;
   readonly logger?: Logger;
 }
 
@@ -87,6 +90,13 @@ export function createControlPlaneApp(
     workspaceSyncClient,
     executorClient,
   );
+  const enableSessionWorkersRouter =
+    options.enableSessionWorkersRouter ??
+    process.env.CONTROL_PLANE_ENABLE_SESSION_WORKERS_ROUTER !== "0";
+  const sessionSyncService =
+    options.sessionSyncService ??
+    createExecutorManagerSessionSyncClientFromEnv() ??
+    lifecycleManager;
 
   const providerRegistry = new ProviderRegistry(
     options.providerAdapters ?? [
@@ -109,7 +119,7 @@ export function createControlPlaneApp(
     runQueueRepository,
     callbackRepository,
     sessionWorkerRepository,
-    lifecycleManager,
+    sessionSyncService,
     {
       logger,
     },
@@ -120,11 +130,13 @@ export function createControlPlaneApp(
     runStateRepo: callbackRepository,
     todoRepo: callbackRepository,
     humanLoopRepo: callbackRepository,
-    sessionSyncService: lifecycleManager,
+    sessionSyncService,
   });
 
   app.use(createHealthRouter());
-  app.use("/api", createSessionWorkersRouter(lifecycleManager));
+  if (enableSessionWorkersRouter) {
+    app.use("/api", createSessionWorkersRouter(lifecycleManager));
+  }
   app.use(
     "/api",
     createRunsRouter({
@@ -153,4 +165,20 @@ export function createControlPlaneApp(
   );
 
   return app;
+}
+
+function createExecutorManagerSessionSyncClientFromEnv():
+  | SessionSyncService
+  | undefined {
+  const executorManagerBaseUrl = process.env.EXECUTOR_MANAGER_BASE_URL;
+  if (!executorManagerBaseUrl) {
+    return undefined;
+  }
+  const rawTimeout = Number(process.env.EXECUTOR_MANAGER_TIMEOUT_MS ?? 10_000);
+  const timeoutMs =
+    Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 10_000;
+  return new ExecutorManagerSessionSyncClient({
+    baseUrl: executorManagerBaseUrl,
+    timeoutMs,
+  });
 }

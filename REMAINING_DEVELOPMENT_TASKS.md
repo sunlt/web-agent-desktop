@@ -314,8 +314,8 @@
 - [x] 新增独立 `gateway` 服务（TypeScript + Express），支持 `/api` 反向代理到 `control-plane`。
 - [x] `docker-compose` 接入 `gateway`，并调整 `portal -> gateway -> control-plane` 链路。
 - [x] pre-commit 检查纳入 `gateway` 的 lint/typecheck。
-- [x] 新增 `executor-manager` 独立服务并由 `gateway` 分流 `session-workers` 路由（delegated 模式）。
-- [ ] 将 `session-worker` 生命周期核心逻辑从 control-plane 完全迁移到 `executor-manager`（去除 delegated 依赖）。
+- [x] 新增 `executor-manager` 独立服务并由 `gateway` 分流 `session-workers` 路由（已从 delegated 过渡到 native 实现）。
+- [x] 将 `session-worker` 生命周期核心逻辑从 control-plane 完全迁移到 `executor-manager`（去除 delegated 依赖）。
 - [x] 引入独立 observability 组件基础层：`prometheus`（compose）统一采集各服务健康与对账指标入口。
 - [x] 补齐 observability 深化能力：告警规则、日志聚合与可视化看板（Grafana/Loki/Alertmanager）。
 - [ ] observability 通知渠道深化（企业告警接入：Webhook/IM/On-call 值班策略）与告警抑制策略精细化。
@@ -344,4 +344,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 18（网关/BFF 与部署边界拆分）
-- `next_commit`: `feat(phase-18): migrate session lifecycle core to executor-manager`
+- `next_commit`: `feat(phase-18): validate gateway + executor-manager real-env e2e`

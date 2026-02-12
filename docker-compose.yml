@@ -9,6 +9,8 @@ services:
       - PORT=3000
       - CONTROL_PLANE_STORAGE=postgres
       - CONTROL_PLANE_DOCKER=cli
+      - CONTROL_PLANE_ENABLE_SESSION_WORKERS_ROUTER=0
+      - EXECUTOR_MANAGER_BASE_URL=http://executor-manager:3010
       - EXECUTOR_BASE_URL=http://executor:8090
       - EXECUTOR_AUTH_TOKEN=executor-secret
       - EXECUTOR_TIMEOUT_MS=30000
@@ -118,10 +120,26 @@ services:
       - "3010:3010"
     environment:
       - EXECUTOR_MANAGER_PORT=3010
-      - EXECUTOR_MANAGER_CONTROL_PLANE_URL=http://control-plane:3000
-      - EXECUTOR_MANAGER_UPSTREAM_TIMEOUT_MS=30000
+      - EXECUTOR_MANAGER_STORAGE=postgres
+      - EXECUTOR_MANAGER_DOCKER=cli
+      - EXECUTOR_BASE_URL=http://executor:8090
+      - EXECUTOR_AUTH_TOKEN=executor-secret
+      - EXECUTOR_TIMEOUT_MS=30000
+      - EXECUTOR_MAX_RETRIES=1
+      - EXECUTOR_RETRY_DELAY_MS=200
+      - EXECUTOR_RETRY_STATUS_CODES=500,502,503,504
+      - EXECUTOR_CONTAINER_IMAGE=executor:latest
+      - EXECUTOR_CONTAINER_NETWORK=agent-network
+      - PGHOST=pgsql
+      - PGPORT=5432
+      - PGUSER=app
+      - PGPASSWORD=app123456
+      - PGDATABASE=app
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - control-plane
+      - pgsql
+      - executor
     networks:
       - agent-network
     restart: always
