@@ -115,46 +115,18 @@ export class PostgresRbacRepository implements RbacRepository {
   }
 
   async canReadPath(userId: string, path: string): Promise<boolean> {
-    const [rolesResult, policiesResult] = await Promise.all([
-      this.pool.query<{ role_key: string }>(
-        `
-          SELECT role_key
-          FROM user_role_bindings
-          WHERE user_id = $1
-        `,
-        [userId],
-      ),
-      this.pool.query<{
-        path_prefix: string;
-        principal_type: "all" | "user" | "role";
-        principal_id: string | null;
-        can_read: boolean;
-      }>(
-        `
-          SELECT path_prefix, principal_type, principal_id, can_read
-          FROM file_acl_policies
-          WHERE $2 LIKE (path_prefix || '%')
-        `,
-        [userId, normalizePath(path)],
-      ),
-    ]);
+    return this.canAccessPath({
+      userId,
+      path,
+      access: "read",
+    });
+  }
 
-    const roles = new Set(rolesResult.rows.map((item) => item.role_key));
-    if (roles.has("platform_admin")) {
-      return true;
-    }
-
-    return policiesResult.rows.some((policy) => {
-      if (!policy.can_read) {
-        return false;
-      }
-      if (policy.principal_type === "all") {
-        return true;
-      }
-      if (policy.principal_type === "user") {
-        return policy.principal_id === userId;
-      }
-      return policy.principal_id ? roles.has(policy.principal_id) : false;
+  async canWritePath(userId: string, path: string): Promise<boolean> {
+    return this.canAccessPath({
+      userId,
+      path,
+      access: "write",
     });
   }
 
@@ -180,6 +152,57 @@ export class PostgresRbacRepository implements RbacRepository {
         input.ts,
       ],
     );
+  }
+
+  private async canAccessPath(input: {
+    userId: string;
+    path: string;
+    access: "read" | "write";
+  }): Promise<boolean> {
+    const { userId, path, access } = input;
+    const [rolesResult, policiesResult] = await Promise.all([
+      this.pool.query<{ role_key: string }>(
+        `
+          SELECT role_key
+          FROM user_role_bindings
+          WHERE user_id = $1
+        `,
+        [userId],
+      ),
+      this.pool.query<{
+        path_prefix: string;
+        principal_type: "all" | "user" | "role";
+        principal_id: string | null;
+        can_read: boolean;
+        can_write: boolean;
+      }>(
+        `
+          SELECT path_prefix, principal_type, principal_id, can_read, can_write
+          FROM file_acl_policies
+          WHERE $2 LIKE (path_prefix || '%')
+        `,
+        [userId, normalizePath(path)],
+      ),
+    ]);
+
+    const roles = new Set(rolesResult.rows.map((item) => item.role_key));
+    if (roles.has("platform_admin")) {
+      return true;
+    }
+
+    return policiesResult.rows.some((policy) => {
+      const allowedByPolicy = access === "read" ? policy.can_read : policy.can_write;
+      if (!allowedByPolicy) {
+        return false;
+      }
+      if (policy.principal_type === "all") {
+        return true;
+      }
+      if (policy.principal_type === "user") {
+        return policy.principal_id === userId;
+      }
+      return policy.principal_id ? roles.has(policy.principal_id) : false;
+    });
   }
 }
 

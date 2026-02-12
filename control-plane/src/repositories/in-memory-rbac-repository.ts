@@ -35,6 +35,7 @@ interface FileAclPolicy {
   principalType: PrincipalType;
   principalId?: string;
   canRead: boolean;
+  canWrite: boolean;
 }
 
 export class InMemoryRbacRepository implements RbacRepository {
@@ -92,12 +93,14 @@ export class InMemoryRbacRepository implements RbacRepository {
     principalType: PrincipalType;
     principalId?: string;
     canRead: boolean;
+    canWrite?: boolean;
   }): void {
     this.filePolicies.push({
       pathPrefix: normalizePathPrefix(input.pathPrefix),
       principalType: input.principalType,
       principalId: input.principalId,
       canRead: input.canRead,
+      canWrite: input.canWrite ?? false,
     });
   }
 
@@ -134,6 +137,31 @@ export class InMemoryRbacRepository implements RbacRepository {
   }
 
   async canReadPath(userId: string, path: string): Promise<boolean> {
+    return this.canAccessPath({
+      userId,
+      path,
+      access: "read",
+    });
+  }
+
+  async canWritePath(userId: string, path: string): Promise<boolean> {
+    return this.canAccessPath({
+      userId,
+      path,
+      access: "write",
+    });
+  }
+
+  async recordFileAudit(input: FileAuditLogInput): Promise<void> {
+    this.auditLogs.push({ ...input });
+  }
+
+  private canAccessPath(input: {
+    userId: string;
+    path: string;
+    access: "read" | "write";
+  }): boolean {
+    const { userId, path, access } = input;
     const normalized = normalizePathPrefix(path);
     const roles = this.userRoles.get(userId) ?? new Set<string>();
     if (roles.has("platform_admin")) {
@@ -141,7 +169,8 @@ export class InMemoryRbacRepository implements RbacRepository {
     }
 
     return this.filePolicies.some((policy) => {
-      if (!policy.canRead) {
+      const allowedByPolicy = access === "read" ? policy.canRead : policy.canWrite;
+      if (!allowedByPolicy) {
         return false;
       }
 
@@ -159,10 +188,6 @@ export class InMemoryRbacRepository implements RbacRepository {
 
       return policy.principalId ? roles.has(policy.principalId) : false;
     });
-  }
-
-  async recordFileAudit(input: FileAuditLogInput): Promise<void> {
-    this.auditLogs.push({ ...input });
   }
 
   private canViewApp(

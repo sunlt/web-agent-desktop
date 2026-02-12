@@ -125,4 +125,129 @@ describe("Apps + Files RBAC E2E", () => {
     expect(audit.length).toBe(3);
     expect(audit.some((item) => item.allowed === false)).toBe(true);
   });
+
+  test("should enforce file write permissions and persist mutations", async () => {
+    const rbac = new InMemoryRbacRepository();
+    rbac.addUser({ userId: "u-alice", departmentId: "dep-eng" });
+    rbac.bindUserRole({ userId: "u-alice", roleKey: "member" });
+
+    rbac.addFilePolicy({
+      pathPrefix: "/workspace/public",
+      principalType: "user",
+      principalId: "u-alice",
+      canRead: true,
+      canWrite: true,
+    });
+
+    const app = createControlPlaneApp({
+      rbacRepository: rbac,
+      fileBrowser: new LocalReadonlyFileBrowser(rootDir),
+    });
+
+    await withHttpServer(app, async (baseUrl) => {
+      const writeResponse = await fetch(`${baseUrl}/api/files/file`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: "u-alice",
+          path: "/workspace/public/notes.md",
+          content: "# hello from write",
+        }),
+      });
+      expect(writeResponse.status).toBe(200);
+
+      const readResponse = await fetch(
+        `${baseUrl}/api/files/file?userId=u-alice&path=${encodeURIComponent("/workspace/public/notes.md")}`,
+      );
+      expect(readResponse.status).toBe(200);
+      const readBody = (await readResponse.json()) as {
+        path: string;
+        encoding: string;
+        content: string;
+      };
+      expect(readBody.path).toBe("/workspace/public/notes.md");
+      expect(readBody.encoding).toBe("utf8");
+      expect(readBody.content).toContain("hello from write");
+
+      const mkdirResponse = await fetch(`${baseUrl}/api/files/mkdir`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: "u-alice",
+          path: "/workspace/public/assets",
+        }),
+      });
+      expect(mkdirResponse.status).toBe(201);
+
+      const uploadResponse = await fetch(`${baseUrl}/api/files/upload`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: "u-alice",
+          path: "/workspace/public/assets/raw.bin",
+          contentBase64: Buffer.from("binary-content", "utf8").toString("base64"),
+        }),
+      });
+      expect(uploadResponse.status).toBe(201);
+
+      const renameResponse = await fetch(`${baseUrl}/api/files/rename`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: "u-alice",
+          path: "/workspace/public/assets/raw.bin",
+          newPath: "/workspace/public/assets/raw-renamed.bin",
+        }),
+      });
+      expect(renameResponse.status).toBe(200);
+
+      const renamedDownload = await fetch(
+        `${baseUrl}/api/files/download?userId=u-alice&path=${encodeURIComponent("/workspace/public/assets/raw-renamed.bin")}`,
+      );
+      expect(renamedDownload.status).toBe(200);
+      expect(await renamedDownload.text()).toBe("binary-content");
+
+      const deleteResponse = await fetch(
+        `${baseUrl}/api/files/file?userId=u-alice&path=${encodeURIComponent("/workspace/public/assets/raw-renamed.bin")}`,
+        {
+          method: "DELETE",
+        },
+      );
+      expect(deleteResponse.status).toBe(200);
+
+      const deletedRead = await fetch(
+        `${baseUrl}/api/files/file?userId=u-alice&path=${encodeURIComponent("/workspace/public/assets/raw-renamed.bin")}`,
+      );
+      expect(deletedRead.status).toBe(404);
+
+      const forbiddenWrite = await fetch(`${baseUrl}/api/files/file`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: "u-alice",
+          path: "/workspace/private/deny.txt",
+          content: "forbidden",
+        }),
+      });
+      expect(forbiddenWrite.status).toBe(403);
+    });
+
+    const audit = rbac.getAuditLogs();
+    expect(audit.some((item) => item.action === "write" && item.allowed)).toBe(true);
+    expect(audit.some((item) => item.action === "upload" && item.allowed)).toBe(true);
+    expect(audit.some((item) => item.action === "rename" && item.allowed)).toBe(true);
+    expect(audit.some((item) => item.action === "delete" && item.allowed)).toBe(true);
+    expect(audit.some((item) => item.action === "mkdir" && item.allowed)).toBe(true);
+    expect(audit.some((item) => item.action === "write" && !item.allowed)).toBe(true);
+  });
 });
