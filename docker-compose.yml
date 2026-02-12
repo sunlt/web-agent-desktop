@@ -119,6 +119,7 @@ services:
       - pgsql_data:/var/lib/postgresql/data
       - ./control-plane/sql/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
       - ./control-plane/sql/002_rbac_and_file_acl.sql:/docker-entrypoint-initdb.d/002_rbac_and_file_acl.sql:ro
+      - ./control-plane/sql/003_chat_history.sql:/docker-entrypoint-initdb.d/003_chat_history.sql:ro
     networks:
       - agent-network
     restart: always

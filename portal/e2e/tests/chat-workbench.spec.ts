@@ -30,6 +30,25 @@ type TodoEvent = {
   eventTs: string;
 };
 
+type ChatSummary = {
+  chatId: string;
+  sessionId: string;
+  title: string;
+  provider: string | null;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageAt: string | null;
+};
+
+type ChatMessage = {
+  id: string;
+  chatId: string;
+  role: "system" | "user" | "assistant";
+  content: string;
+  createdAt: string;
+};
+
 type MockApiState = {
   runId: string;
   pendingRequests: PendingRequest[];
@@ -37,6 +56,8 @@ type MockApiState = {
   todoEvents: TodoEvent[];
   replyPayloads: Array<{ runId: string; questionId: string; answer: string }>;
   sseBody: string;
+  historyChats: ChatSummary[];
+  historyMessages: Record<string, ChatMessage[]>;
 };
 
 test.describe("Portal Chat Workbench", () => {
@@ -69,6 +90,21 @@ test.describe("Portal Chat Workbench", () => {
         },
       ],
       replyPayloads: [],
+      historyChats: [
+        {
+          chatId: "chat-e2e-1",
+          sessionId: "chat-e2e-1",
+          title: "会话 1",
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          createdAt: now,
+          updatedAt: now,
+          lastMessageAt: null,
+        },
+      ],
+      historyMessages: {
+        "chat-e2e-1": [],
+      },
       sseBody: buildSseBody([
         {
           event: "run.status",
@@ -174,6 +210,21 @@ test.describe("Portal Chat Workbench", () => {
       todoItems: [],
       todoEvents: [],
       replyPayloads: [],
+      historyChats: [
+        {
+          chatId: "chat-e2e-2",
+          sessionId: "chat-e2e-2",
+          title: "会话 2",
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          createdAt: now,
+          updatedAt: now,
+          lastMessageAt: null,
+        },
+      ],
+      historyMessages: {
+        "chat-e2e-2": [],
+      },
       sseBody: buildSseBody([
         {
           event: "run.status",
@@ -240,11 +291,129 @@ test.describe("Portal Chat Workbench", () => {
 });
 
 async function mockPortalApi(page: Page, state: MockApiState): Promise<void> {
+  let chatSequence = state.historyChats.length;
+
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method().toUpperCase();
     const path = url.pathname;
+
+    if (path === "/api/chat-opencode-history" && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total: state.historyChats.length,
+          chats: state.historyChats,
+        }),
+      });
+    }
+
+    if (path === "/api/chat-opencode-history" && method === "POST") {
+      const raw = request.postData() ?? "{}";
+      const payload = JSON.parse(raw) as {
+        chatId?: string;
+        sessionId?: string;
+        title?: string;
+        provider?: string;
+        model?: string;
+      };
+      chatSequence += 1;
+      const chatId = payload.chatId ?? `chat-generated-${chatSequence}`;
+      const now = new Date().toISOString();
+      const chat: ChatSummary = {
+        chatId,
+        sessionId: payload.sessionId ?? chatId,
+        title: payload.title ?? "新会话",
+        provider: payload.provider ?? "codex-cli",
+        model: payload.model ?? "gpt-5.1-codex",
+        createdAt: now,
+        updatedAt: now,
+        lastMessageAt: null,
+      };
+      state.historyChats = [chat, ...state.historyChats];
+      state.historyMessages[chatId] = [];
+      return route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ chat }),
+      });
+    }
+
+    if (path.startsWith("/api/chat-opencode-history/")) {
+      const chatId = decodeURIComponent(
+        path.replace("/api/chat-opencode-history/", ""),
+      );
+      const chat = state.historyChats.find((item) => item.chatId === chatId);
+      if (!chat) {
+        return route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "chat session not found" }),
+        });
+      }
+
+      if (method === "GET") {
+        const messages = state.historyMessages[chatId] ?? [];
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            chat,
+            total: messages.length,
+            messages,
+          }),
+        });
+      }
+
+      if (method === "PUT") {
+        const raw = request.postData() ?? "{}";
+        const payload = JSON.parse(raw) as {
+          title?: string;
+          provider?: string;
+          model?: string;
+          messages: Array<{
+            role: "system" | "user" | "assistant";
+            content: string;
+            createdAt?: string;
+          }>;
+        };
+        const now = new Date().toISOString();
+        const messages = payload.messages.map((item, index) => ({
+          id: `${chatId}:${index + 1}`,
+          chatId,
+          role: item.role,
+          content: item.content,
+          createdAt: item.createdAt ?? now,
+        }));
+        state.historyMessages[chatId] = messages;
+
+        const updatedChat: ChatSummary = {
+          ...chat,
+          title: payload.title ?? chat.title,
+          provider: payload.provider ?? chat.provider,
+          model: payload.model ?? chat.model,
+          updatedAt: now,
+          lastMessageAt: messages.at(-1)?.createdAt ?? null,
+        };
+        state.historyChats = [
+          updatedChat,
+          ...state.historyChats.filter((item) => item.chatId !== chatId),
+        ];
+
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            chat: updatedChat,
+            total: messages.length,
+            messages,
+          }),
+        });
+      }
+    }
 
     if (path === "/api/runs/start" && method === "POST") {
       return route.fulfill({

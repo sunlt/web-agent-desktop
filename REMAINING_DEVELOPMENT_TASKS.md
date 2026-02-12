@@ -277,7 +277,7 @@
 
 **Tasks**:
 - [x] 前端 E2E 基线：引入 Playwright 并落地首批用例（发送消息、流式回包、todo、human-loop 回复）。
-- [ ] 历史会话：对接会话列表/加载/恢复（`chatId -> session_id` 映射）。
+- [x] 历史会话：对接会话列表/加载/恢复（`chatId -> session_id` 映射）。
 - [ ] 文件域：补齐上传/重命名/删除/在线编辑 + 审计闭环。
 - [ ] 文件预览：文本高亮、图片/PDF 内嵌、大文件分页读取。
 - [ ] 应用商店接入：展示可见/可用应用并与会话入口联动。
@@ -307,4 +307,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 17（前端 E2E 基线 + 工作台剩余能力补齐）
-- `next_commit`: `feat(phase-17): add playwright e2e baseline for portal chat workbench`
+- `next_commit`: `feat(phase-17): implement chat history api and portal integration`

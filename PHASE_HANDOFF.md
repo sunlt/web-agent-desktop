@@ -940,3 +940,63 @@
 
 ### next_phase
 - Phase 17 后续子阶段：接入历史会话与文件域，扩展真实联调型前端 E2E。
+
+---
+
+## Phase 17: 历史会话（chatId -> session_id）前后端接入
+
+### objective
+- 落地历史会话最小闭环：后端提供会话列表/创建/加载/保存接口，前端支持会话切换与消息持久化恢复。
+
+### inputs
+- `设计.md` 23.4/23.5 关于历史会话 API 与 `chatId -> session_id` 映射要求。
+- 已完成 Phase 16 `useChat` 前端主链路与 Phase 17 E2E 基线。
+
+### actions
+- 后端新增 chat history 仓储与路由：
+  - 新增仓储接口与实现：InMemory + Postgres。
+  - 新增路由：`GET/POST /api/chat-opencode-history`、`GET/PUT /api/chat-opencode-history/:chatId`。
+  - 新增 Postgres 迁移 `003_chat_history.sql`，并更新 compose 初始化挂载。
+- 前端 `portal` 接入历史会话：
+  - 启动时加载历史列表，无历史则自动创建首会话。
+  - 支持会话切换、手动新建会话。
+  - `useChat` 完成后自动调用历史保存接口持久化消息。
+  - 聊天区新增 history pane（左侧列表）。
+- 测试补齐：
+  - control-plane 新增 `chat-history.e2e.test.ts`。
+  - portal Playwright mock 扩展 chat history 接口，保持 2 条用例通过。
+
+### outputs
+- `control-plane/src/repositories/chat-history-repository.ts`
+- `control-plane/src/repositories/in-memory-chat-history-repository.ts`
+- `control-plane/src/repositories/postgres-chat-history-repository.ts`
+- `control-plane/src/routes/chat-history.ts`
+- `control-plane/src/app.ts`
+- `control-plane/src/server.ts`
+- `control-plane/sql/003_chat_history.sql`
+- `control-plane/test/e2e/chat-history.e2e.test.ts`
+- `docker-compose.yml`
+- `portal/src/App.tsx`
+- `portal/src/styles.css`
+- `portal/e2e/tests/chat-workbench.spec.ts`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `cd control-plane && npm run build`
+  - `cd control-plane && npm test`
+  - `cd portal && npm run build`
+  - `cd portal && npm run test`
+- results:
+  - control-plane 构建通过，测试通过（`chat-history.e2e` 新增并通过）。
+  - portal 构建通过，Playwright 2/2 通过。
+
+### gate_result
+- **Pass**（历史会话前后端闭环可用）
+
+### risks
+- 当前会话消息保存采用整段覆盖写入，尚未做增量写入优化。
+- 历史会话未接入权限模型（当前默认同租户可见），后续需补账号维度隔离。
+
+### next_phase
+- Phase 17 后续子阶段：文件域编辑/预览能力 + 应用商店接入 + 历史会话权限隔离。

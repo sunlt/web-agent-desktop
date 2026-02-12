@@ -122,6 +122,27 @@ type RunStartConfig = {
   requireHumanLoop: boolean;
 };
 
+type HistoryStatus = "idle" | "loading" | "error";
+
+type ChatHistorySummary = {
+  chatId: string;
+  sessionId: string;
+  title: string;
+  provider: string | null;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageAt: string | null;
+};
+
+type ChatHistoryMessage = {
+  id: string;
+  chatId: string;
+  role: "system" | "user" | "assistant";
+  content: string;
+  createdAt: string;
+};
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(
   /\/$/,
   "",
@@ -144,6 +165,10 @@ export default function App() {
   const [runStatus, setRunStatus] = useState<UiRunStatus>("idle");
   const [runDetail, setRunDetail] = useState<string>("");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<ChatHistorySummary[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<HistoryStatus>("idle");
+  const [historyError, setHistoryError] = useState<string>("");
 
   const [todoItems, setTodoItems] = useState<TodoItem[]>([]);
   const [todoEvents, setTodoEvents] = useState<TodoEvent[]>([]);
@@ -155,6 +180,8 @@ export default function App() {
   const [errorText, setErrorText] = useState<string>("");
 
   const activeRunIdRef = useRef<string | null>(null);
+  const activeChatIdRef = useRef<string | null>(null);
+  const historyBootstrappedRef = useRef(false);
   const runConfigRef = useRef<RunStartConfig>({
     provider: "codex-cli",
     model: DEFAULT_MODEL["codex-cli"],
@@ -168,6 +195,10 @@ export default function App() {
   useEffect(() => {
     activeRunIdRef.current = activeRunId;
   }, [activeRunId]);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
 
   useEffect(() => {
     runConfigRef.current = {
@@ -238,6 +269,39 @@ export default function App() {
       return (await response.json()) as T;
     },
     [],
+  );
+
+  const upsertHistorySummary = useCallback((chat: ChatHistorySummary) => {
+    setChatHistory((prev) => sortHistorySummaries([chat, ...prev]));
+  }, []);
+
+  const persistChatHistory = useCallback(
+    async (chatId: string, snapshot: readonly PortalUiMessage[]) => {
+      const payloadMessages = toHistoryMessages(snapshot);
+      const firstUser = payloadMessages.find((item) => item.role === "user");
+      const title = firstUser
+        ? firstUser.content.slice(0, 24).trim() || "新会话"
+        : "新会话";
+
+      const saved = await fetchJson<{ chat: ChatHistorySummary }>(
+        `/chat-opencode-history/${encodeURIComponent(chatId)}`,
+        {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            title,
+            provider,
+            model,
+            messages: payloadMessages,
+          }),
+        },
+      );
+
+      upsertHistorySummary(saved.chat);
+    },
+    [fetchJson, model, provider, upsertHistorySummary],
   );
 
   const refreshRunPanels = useCallback(
@@ -365,6 +429,7 @@ export default function App() {
 
   const {
     messages,
+    setMessages,
     sendMessage,
     stop,
     status: chatStatus,
@@ -377,15 +442,169 @@ export default function App() {
       setRunStatus("failed");
       appendTimeline(`run.error: ${error.message}`);
     },
-    onFinish: () => {
+    onFinish: (event) => {
       const runId = activeRunIdRef.current;
       if (runId) {
         void refreshRunPanels(runId);
+      }
+      const chatId = activeChatIdRef.current;
+      if (chatId) {
+        void persistChatHistory(chatId, event.messages as PortalUiMessage[]);
       }
     },
   });
 
   const submitting = chatStatus === "submitted" || chatStatus === "streaming";
+
+  const createHistorySession = useCallback(async () => {
+    const created = await fetchJson<{ chat: ChatHistorySummary }>(
+      "/chat-opencode-history",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          provider,
+          model,
+          title: "新会话",
+        }),
+      },
+    );
+    upsertHistorySummary(created.chat);
+    return created.chat.chatId;
+  }, [fetchJson, model, provider, upsertHistorySummary]);
+
+  const resetRunView = useCallback(() => {
+    activeRunIdRef.current = null;
+    setActiveRunId(null);
+    setRunStatus("idle");
+    setRunDetail("");
+    setErrorText("");
+    setTodoItems([]);
+    setTodoEvents([]);
+    setPendingRequests([]);
+    setTimeline([]);
+    clearError();
+  }, [clearError]);
+
+  const loadChatDetail = useCallback(
+    async (chatId: string) => {
+      setHistoryStatus("loading");
+      setHistoryError("");
+      try {
+        const detail = await fetchJson<{
+          chat: ChatHistorySummary;
+          messages: ChatHistoryMessage[];
+        }>(`/chat-opencode-history/${encodeURIComponent(chatId)}`);
+
+        setMessages(toPortalMessages(detail.messages));
+        upsertHistorySummary(detail.chat);
+        setActiveChatId(detail.chat.chatId);
+        resetRunView();
+        setHistoryStatus("idle");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setHistoryStatus("error");
+        setHistoryError(message);
+      }
+    },
+    [fetchJson, resetRunView, setMessages, upsertHistorySummary],
+  );
+
+  const ensureActiveChat = useCallback(async () => {
+    const current = activeChatIdRef.current;
+    if (current) {
+      return current;
+    }
+
+    const chatId = await createHistorySession();
+    setActiveChatId(chatId);
+    setMessages([]);
+    return chatId;
+  }, [createHistorySession, setMessages]);
+
+  const handleCreateChat = useCallback(async () => {
+    if (submitting || runStatus === "running") {
+      return;
+    }
+    setHistoryError("");
+    try {
+      const chatId = await createHistorySession();
+      setActiveChatId(chatId);
+      setMessages([]);
+      setInput("");
+      resetRunView();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setHistoryError(message);
+    }
+  }, [createHistorySession, resetRunView, runStatus, setMessages, submitting]);
+
+  const handleSelectChat = useCallback(
+    async (chatId: string) => {
+      if (submitting || runStatus === "running" || chatId === activeChatIdRef.current) {
+        return;
+      }
+      setInput("");
+      await loadChatDetail(chatId);
+    },
+    [loadChatDetail, runStatus, submitting],
+  );
+
+  useEffect(() => {
+    if (historyBootstrappedRef.current) {
+      return;
+    }
+    historyBootstrappedRef.current = true;
+
+    let cancelled = false;
+
+    void (async () => {
+      setHistoryStatus("loading");
+      setHistoryError("");
+      try {
+        const list = await fetchJson<{ chats: ChatHistorySummary[] }>(
+          "/chat-opencode-history?limit=50",
+        );
+        if (cancelled) {
+          return;
+        }
+
+        const sorted = sortHistorySummaries(list.chats ?? []);
+        setChatHistory(sorted);
+
+        if (sorted.length === 0) {
+          const chatId = await createHistorySession();
+          if (cancelled) {
+            return;
+          }
+          setActiveChatId(chatId);
+          setMessages([]);
+          setHistoryStatus("idle");
+          return;
+        }
+
+        const firstChat = sorted[0];
+        if (!firstChat) {
+          setHistoryStatus("idle");
+          return;
+        }
+        await loadChatDetail(firstChat.chatId);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        setHistoryStatus("error");
+        setHistoryError(message);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [createHistorySession, fetchJson, loadChatDetail, setMessages]);
 
   useEffect(() => {
     if (!activeRunId) {
@@ -433,6 +652,8 @@ export default function App() {
       appendTimeline(`run.start (${provider})`);
 
       try {
+        const chatId = await ensureActiveChat();
+        setActiveChatId(chatId);
         await sendMessage({
           text,
           metadata: {
@@ -460,6 +681,7 @@ export default function App() {
     [
       appendTimeline,
       clearError,
+      ensureActiveChat,
       input,
       provider,
       refreshRunPanels,
@@ -591,6 +813,42 @@ export default function App() {
       </section>
 
       <main className="layout">
+        <aside className="history-pane panel">
+          <div className="history-header">
+            <h3>历史会话</h3>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void handleCreateChat()}
+              disabled={submitting || runStatus === "running"}
+            >
+              新建
+            </button>
+          </div>
+          {historyStatus === "loading" ? (
+            <p className="muted">会话加载中...</p>
+          ) : null}
+          {historyError ? <p className="error-text">{historyError}</p> : null}
+          <div className="history-list">
+            {chatHistory.length === 0 ? (
+              <p className="muted">暂无历史会话</p>
+            ) : (
+              chatHistory.map((chat) => (
+                <button
+                  key={chat.chatId}
+                  type="button"
+                  className={`history-item ${chat.chatId === activeChatId ? "active" : ""}`}
+                  onClick={() => void handleSelectChat(chat.chatId)}
+                  disabled={submitting || runStatus === "running"}
+                >
+                  <strong>{chat.title}</strong>
+                  <span>{formatTime(chat.lastMessageAt ?? chat.updatedAt)}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </aside>
+
         <section className="chat-pane">
           <div className="messages" role="log" aria-live="polite">
             {messages.length === 0 ? (
@@ -657,6 +915,8 @@ export default function App() {
           <section className="panel">
             <h3>Run 状态</h3>
             <dl>
+              <dt>chatId</dt>
+              <dd>{activeChatId ?? "-"}</dd>
               <dt>runId</dt>
               <dd>{activeRunId ?? "-"}</dd>
               <dt>status</dt>
@@ -1013,6 +1273,49 @@ function toRunMessages(messages: PortalUiMessage[]): RunStartMessage[] {
       content: extractMessageText(message).trim(),
     }))
     .filter((message) => message.content.length > 0);
+}
+
+function toHistoryMessages(messages: readonly PortalUiMessage[]): Array<{
+  role: "system" | "user" | "assistant";
+  content: string;
+  createdAt: string;
+}> {
+  return messages
+    .map((message) => ({
+      role: message.role,
+      content: extractMessageText(message).trim(),
+      createdAt: message.metadata?.createdAt ?? new Date().toISOString(),
+    }))
+    .filter((item) => item.content.length > 0);
+}
+
+function toPortalMessages(messages: readonly ChatHistoryMessage[]): PortalUiMessage[] {
+  return messages.map((message) => ({
+    id: `h-${message.id}`,
+    role: message.role,
+    metadata: {
+      createdAt: message.createdAt,
+    },
+    parts: [
+      {
+        type: "text",
+        text: message.content,
+        state: "done",
+      },
+    ],
+  }));
+}
+
+function sortHistorySummaries(
+  chats: readonly ChatHistorySummary[],
+): ChatHistorySummary[] {
+  return Array.from(
+    chats.reduce((map, item) => map.set(item.chatId, item), new Map<string, ChatHistorySummary>()).values(),
+  ).sort((a, b) => {
+    const aTs = new Date(a.lastMessageAt ?? a.updatedAt).getTime();
+    const bTs = new Date(b.lastMessageAt ?? b.updatedAt).getTime();
+    return bTs - aTs;
+  });
 }
 
 function parseSseBuffer(raw: string): { events: ParsedSseEvent[]; rest: string } {

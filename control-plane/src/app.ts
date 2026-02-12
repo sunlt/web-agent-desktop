@@ -14,6 +14,8 @@ import type { WorkspaceSyncClient } from "./ports/workspace-sync-client.js";
 import { InMemoryRunCallbackRepository } from "./repositories/in-memory-run-callback-repository.js";
 import { InMemoryRunQueueRepository } from "./repositories/in-memory-run-queue-repository.js";
 import { InMemoryRbacRepository } from "./repositories/in-memory-rbac-repository.js";
+import { InMemoryChatHistoryRepository } from "./repositories/in-memory-chat-history-repository.js";
+import type { ChatHistoryRepository } from "./repositories/chat-history-repository.js";
 import type { RunCallbackRepository } from "./repositories/run-callback-repository.js";
 import type { RunQueueRepository } from "./repositories/run-queue-repository.js";
 import type { RbacRepository } from "./repositories/rbac-repository.js";
@@ -22,6 +24,7 @@ import type { SessionWorkerRepository } from "./repositories/session-worker-repo
 import { createAppsRouter } from "./routes/apps.js";
 import { createFilesRouter } from "./routes/files.js";
 import { createHealthRouter } from "./routes/health.js";
+import { createChatHistoryRouter } from "./routes/chat-history.js";
 import { createRunQueueRouter } from "./routes/run-queue.js";
 import { createRunCallbacksRouter } from "./routes/run-callbacks.js";
 import { createReconcileRouter } from "./routes/reconcile.js";
@@ -48,6 +51,7 @@ export interface CreateControlPlaneAppOptions {
     lockMs?: DrainQueueInput["lockMs"];
     retryDelayMs?: DrainQueueInput["retryDelayMs"];
   };
+  readonly chatHistoryRepository?: ChatHistoryRepository;
   readonly rbacRepository?: RbacRepository;
   readonly fileBrowser?: FileBrowser;
   readonly logger?: Logger;
@@ -69,6 +73,8 @@ export function createControlPlaneApp(
     options.callbackRepository ?? new InMemoryRunCallbackRepository();
   const runQueueRepository =
     options.runQueueRepository ?? new InMemoryRunQueueRepository();
+  const chatHistoryRepository =
+    options.chatHistoryRepository ?? new InMemoryChatHistoryRepository();
   const rbacRepository =
     options.rbacRepository ?? new InMemoryRbacRepository();
   const fileBrowser =
@@ -121,6 +127,7 @@ export function createControlPlaneApp(
   app.use("/api", createRunsRouter(runOrchestrator));
   app.use("/api", createRunQueueRouter(runQueueManager));
   app.use("/api", createReconcileRouter(reconciler));
+  app.use("/api", createChatHistoryRouter(chatHistoryRepository));
   app.use("/api", createAppsRouter(rbacRepository));
   app.use(
     "/api",

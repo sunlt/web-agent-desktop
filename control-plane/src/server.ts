@@ -6,6 +6,7 @@ import { PostgresRunCallbackRepository } from "./repositories/postgres-run-callb
 import { PostgresRunQueueRepository } from "./repositories/postgres-run-queue-repository.js";
 import { PostgresRbacRepository } from "./repositories/postgres-rbac-repository.js";
 import { PostgresSessionWorkerRepository } from "./repositories/postgres-session-worker-repository.js";
+import { PostgresChatHistoryRepository } from "./repositories/postgres-chat-history-repository.js";
 import { LocalReadonlyFileBrowser } from "./services/file-browser.js";
 
 const usePostgres = process.env.CONTROL_PLANE_STORAGE === "postgres";
@@ -22,6 +23,9 @@ const callbackRepository = pool
   : undefined;
 const runQueueRepository = pool
   ? new PostgresRunQueueRepository(pool)
+  : undefined;
+const chatHistoryRepository = pool
+  ? new PostgresChatHistoryRepository(pool)
   : undefined;
 const rbacRepository = pool
   ? new PostgresRbacRepository(pool)
@@ -58,6 +62,7 @@ const app = createControlPlaneApp({
   workspaceSyncClient: executorClient,
   executorClient,
   runQueueRepository,
+  chatHistoryRepository,
   rbacRepository,
   fileBrowser: new LocalReadonlyFileBrowser(
     process.env.FILE_BROWSER_ROOT ?? process.cwd(),
