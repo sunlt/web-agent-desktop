@@ -75,4 +75,9 @@ export interface RunQueueRepository {
   }>;
 
   findByRunId(runId: string): Promise<RunQueueItem | null>;
+
+  listStaleClaimed(input: {
+    now: Date;
+    limit: number;
+  }): Promise<readonly RunQueueItem[]>;
 }

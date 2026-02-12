@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import { NoopExecutorClient } from "./adapters/noop-executor-client.js";
 import { NoopDockerClient } from "./adapters/noop-docker-client.js";
 import { NoopWorkspaceSyncClient } from "./adapters/noop-workspace-sync-client.js";
+import { createLogger, type Logger } from "./observability/logger.js";
 import { ClaudeCodeProviderAdapter } from "./providers/claude-code-provider.js";
 import { CodexCliProviderAdapter } from "./providers/codex-cli-provider.js";
 import { OpencodeProviderAdapter } from "./providers/opencode-provider.js";
@@ -19,12 +20,14 @@ import type { SessionWorkerRepository } from "./repositories/session-worker-repo
 import { createHealthRouter } from "./routes/health.js";
 import { createRunQueueRouter } from "./routes/run-queue.js";
 import { createRunCallbacksRouter } from "./routes/run-callbacks.js";
+import { createReconcileRouter } from "./routes/reconcile.js";
 import { createRunsRouter } from "./routes/runs.js";
 import { createSessionWorkersRouter } from "./routes/session-workers.js";
 import { CallbackHandler } from "./services/callback-handler.js";
 import { LifecycleManager } from "./services/lifecycle-manager.js";
 import type { DrainQueueInput } from "./services/run-queue-manager.js";
 import { RunQueueManager } from "./services/run-queue-manager.js";
+import { Reconciler } from "./services/reconciler.js";
 import { RunOrchestrator } from "./services/run-orchestrator.js";
 
 export interface CreateControlPlaneAppOptions {
@@ -35,10 +38,12 @@ export interface CreateControlPlaneAppOptions {
   readonly executorClient?: ExecutorClient;
   readonly callbackRepository?: RunCallbackRepository;
   readonly runQueueRepository?: RunQueueRepository;
-  readonly runQueueManagerOptions?: Pick<
-    DrainQueueInput,
-    "owner" | "lockMs" | "retryDelayMs"
-  >;
+  readonly runQueueManagerOptions?: {
+    owner?: DrainQueueInput["owner"];
+    lockMs?: DrainQueueInput["lockMs"];
+    retryDelayMs?: DrainQueueInput["retryDelayMs"];
+  };
+  readonly logger?: Logger;
 }
 
 export function createControlPlaneApp(
@@ -57,6 +62,7 @@ export function createControlPlaneApp(
     options.callbackRepository ?? new InMemoryRunCallbackRepository();
   const runQueueRepository =
     options.runQueueRepository ?? new InMemoryRunQueueRepository();
+  const logger = options.logger ?? createLogger({ component: "control-plane" });
 
   const lifecycleManager = new LifecycleManager(
     sessionWorkerRepository,
@@ -77,7 +83,18 @@ export function createControlPlaneApp(
   const runQueueManager = new RunQueueManager(
     runQueueRepository,
     runOrchestrator,
-    options.runQueueManagerOptions,
+    {
+      ...options.runQueueManagerOptions,
+      logger,
+    },
+  );
+  const reconciler = new Reconciler(
+    runQueueRepository,
+    sessionWorkerRepository,
+    lifecycleManager,
+    {
+      logger,
+    },
   );
   const callbackHandler = new CallbackHandler({
     eventRepo: callbackRepository,
@@ -92,6 +109,7 @@ export function createControlPlaneApp(
   app.use("/api", createSessionWorkersRouter(lifecycleManager));
   app.use("/api", createRunsRouter(runOrchestrator));
   app.use("/api", createRunQueueRouter(runQueueManager));
+  app.use("/api", createReconcileRouter(reconciler));
   app.use(
     "/api",
     createRunCallbacksRouter({

@@ -191,6 +191,26 @@ export class PostgresRunQueueRepository implements RunQueueRepository {
 
     return mapRow(result.rows[0]);
   }
+
+  async listStaleClaimed(input: {
+    now: Date;
+    limit: number;
+  }): Promise<readonly RunQueueItem[]> {
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM run_queue
+        WHERE status = 'claimed'
+          AND lock_expires_at IS NOT NULL
+          AND lock_expires_at <= $1
+        ORDER BY lock_expires_at ASC
+        LIMIT $2
+      `,
+      [input.now, input.limit],
+    );
+
+    return result.rows.map(mapRow);
+  }
 }
 
 function mapRow(row: any): RunQueueItem {

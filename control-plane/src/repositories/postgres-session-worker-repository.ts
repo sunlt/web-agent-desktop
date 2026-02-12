@@ -146,6 +146,34 @@ export class PostgresSessionWorkerRepository implements SessionWorkerRepository 
 
     return result.rows.map(mapRow);
   }
+
+  async listStaleSyncCandidates(cutoff: Date, limit: number): Promise<SessionWorker[]> {
+    const result = await this.pool.query<SessionWorkerRow>(
+      `
+        SELECT
+          session_id,
+          container_id,
+          workspace_s3_prefix,
+          state,
+          last_active_at,
+          stopped_at,
+          last_sync_at,
+          last_sync_status,
+          last_sync_error,
+          created_at,
+          updated_at
+        FROM session_workers
+        WHERE state IN ('running', 'stopped')
+          AND last_sync_status <> 'running'
+          AND (last_sync_at IS NULL OR last_sync_at < $1)
+        ORDER BY COALESCE(last_sync_at, TIMESTAMPTZ 'epoch') ASC
+        LIMIT $2
+      `,
+      [cutoff, limit],
+    );
+
+    return result.rows.map(mapRow);
+  }
 }
 
 function mapRow(row: SessionWorkerRow): SessionWorker {

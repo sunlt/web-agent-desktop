@@ -546,3 +546,68 @@
 
 ### next_phase
 - Phase 11：可观测性与对账修复（结构化日志 + stale run 自动修复）。
+
+---
+
+## Phase 11: 可观测性与对账修复（当前迭代切片 K）
+
+### objective
+- 建立最小可用的可靠性闭环：结构化日志、stale run 修复、stale sync 补偿。
+
+### inputs
+- Phase 9 的 queue 执行循环
+- Phase 10 的流式执行链路
+
+### actions
+- 新增结构化日志组件 `logger.ts`：
+  - JSON 单行输出
+  - 支持 `child` 继承上下文
+  - 统一字段：`traceId/sessionId/runId/executorId/component`
+- `RunQueueManager` 接入结构化日志，记录 claim 执行结果（succeeded/retried/failed/canceled）。
+- 扩展仓储能力：
+  - `RunQueueRepository.listStaleClaimed()`
+  - `SessionWorkerRepository.listStaleSyncCandidates()`
+  - InMemory/Postgres 双实现同步补齐
+- 新增 `Reconciler` 服务：
+  - `reconcileStaleRuns`：修复超时 claimed run，按 attempts 决定 retry/fail
+  - `reconcileStaleSync`：扫描过旧 sync 状态并触发补偿同步
+- 新增对账路由：
+  - `POST /api/reconcile/runs`
+  - `POST /api/reconcile/sync`
+- 新增测试：
+  - `logger.test.ts` 验证结构化字段输出
+  - `reconcile.e2e.test.ts` 验证 stale run + stale sync 修复链路
+
+### outputs
+- `control-plane/src/observability/logger.ts`
+- `control-plane/src/services/reconciler.ts`
+- `control-plane/src/routes/reconcile.ts`
+- `control-plane/src/services/run-queue-manager.ts`
+- `control-plane/src/repositories/run-queue-repository.ts`
+- `control-plane/src/repositories/postgres-run-queue-repository.ts`
+- `control-plane/src/repositories/in-memory-run-queue-repository.ts`
+- `control-plane/src/repositories/session-worker-repository.ts`
+- `control-plane/src/repositories/postgres-session-worker-repository.ts`
+- `control-plane/src/repositories/in-memory-session-worker-repository.ts`
+- `control-plane/test/logger.test.ts`
+- `control-plane/test/e2e/reconcile.e2e.test.ts`
+
+### validation
+- commands:
+  - `npm run build`
+  - `npm test`
+  - `npm run test:e2e:real`
+- results:
+  - TypeScript 构建通过
+  - Vitest 常规集通过（新增 logger/reconcile 测试）
+  - 真实依赖 E2E 通过（无回归）
+
+### gate_result
+- **Pass**（可观测性与对账修复基线已完成）
+
+### risks
+- 当前日志仍为进程 stdout/stderr，尚未接入统一日志平台与告警规则。
+- 对账接口目前为手动触发，尚未接入定时调度器或常驻任务 worker。
+
+### next_phase
+- Phase 12：M2 能力补齐（应用商店可见/可用 + 文件只读浏览/下载 + RBAC 基线）。

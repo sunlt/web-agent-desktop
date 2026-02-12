@@ -107,13 +107,13 @@
 - `control-plane/test/e2e/reconcile.e2e.test.ts`（新增）
 
 **Tasks**:
-- [ ] 结构化日志统一字段（trace_id/session_id/run_id/executor_id）。
-- [ ] 超时 run 对账任务（query executor 状态，失败兜底落库）。
-- [ ] 过旧 sync 状态补偿任务（增量 sync）。
+- [x] 结构化日志统一字段（trace_id/session_id/run_id/executor_id）。
+- [x] 超时 run 对账任务（query executor 状态，失败兜底落库）。
+- [x] 过旧 sync 状态补偿任务（增量 sync）。
 
 **Verification Criteria**:
-- [ ] 注入 manager 中断后可自动修复 run 终态。
-- [ ] 异常路径可通过 trace 字段串联日志。
+- [x] 注入 manager 中断后可自动修复 run 终态。
+- [x] 异常路径可通过 trace 字段串联日志。
 
 **Exit Criteria**:
 - 关键异常具备自动修复或明确告警出口。
@@ -150,9 +150,9 @@
 1. Phase 8（已完成）
 2. Phase 9（已完成）
 3. Phase 10（已完成）
-4. Phase 11
+4. Phase 11（已完成）
 5. Phase 12
 
 ## 当前阶段
-- `in_progress`: Phase 11
-- `next_commit`: `feat(phase-11): add observability and reconciler jobs`
+- `in_progress`: Phase 12
+- `next_commit`: `feat(phase-12): add rbac app-store and readonly files apis`

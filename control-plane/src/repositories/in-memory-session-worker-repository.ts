@@ -37,6 +37,29 @@ export class InMemorySessionWorkerRepository implements SessionWorkerRepository 
       .slice(0, Math.max(0, limit))
       .map((item) => clone(item));
   }
+
+  async listStaleSyncCandidates(cutoff: Date, limit: number): Promise<SessionWorker[]> {
+    return Array.from(this.data.values())
+      .filter((item) => {
+        if (item.state === "deleted") {
+          return false;
+        }
+        if (item.lastSyncStatus === "running") {
+          return false;
+        }
+        if (!item.lastSyncAt) {
+          return true;
+        }
+        return item.lastSyncAt < cutoff;
+      })
+      .sort((a, b) => {
+        const left = a.lastSyncAt?.getTime() ?? 0;
+        const right = b.lastSyncAt?.getTime() ?? 0;
+        return left - right;
+      })
+      .slice(0, Math.max(0, limit))
+      .map((item) => clone(item));
+  }
 }
 
 function clone<T>(value: T): T {

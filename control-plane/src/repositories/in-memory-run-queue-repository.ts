@@ -138,6 +138,21 @@ export class InMemoryRunQueueRepository implements RunQueueRepository {
   async findByRunId(runId: string): Promise<RunQueueItem | null> {
     return this.items.get(runId) ?? null;
   }
+
+  async listStaleClaimed(input: {
+    now: Date;
+    limit: number;
+  }): Promise<readonly RunQueueItem[]> {
+    return [...this.items.values()]
+      .filter(
+        (item) =>
+          item.status === "claimed" &&
+          item.lockExpiresAt !== null &&
+          item.lockExpiresAt <= input.now,
+      )
+      .sort((a, b) => a.lockExpiresAt!.getTime() - b.lockExpiresAt!.getTime())
+      .slice(0, Math.max(0, input.limit));
+  }
 }
 
 function isClaimable(item: RunQueueItem, now: Date): boolean {

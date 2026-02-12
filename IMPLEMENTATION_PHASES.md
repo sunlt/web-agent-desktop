@@ -199,3 +199,23 @@
 
 **Exit Criteria**:
 - run 过程可实时订阅，断线后可按游标补齐事件
+
+## Phase 11: 可观测性与对账修复
+**Type**: Reliability + Ops  
+**Estimated**: 4 小时  
+**Files**: `control-plane/src/observability/logger.ts`, `control-plane/src/services/reconciler.ts`, `control-plane/src/routes/reconcile.ts`, `control-plane/test/e2e/reconcile.e2e.test.ts`
+
+**Tasks**:
+- [x] 增加结构化日志模块，统一 trace/session/run/executor 字段
+- [x] `RunQueueManager` 接入结构化日志输出关键状态
+- [x] 实现 stale claimed run 对账修复（retry/fail）
+- [x] 实现 stale sync worker 补偿同步
+- [x] 暴露对账接口并补 E2E 验证
+
+**Verification Criteria**:
+- [x] `npm run build` 通过
+- [x] `npm test` 通过（新增 logger 与 reconcile E2E）
+- [x] `RUN_REAL_E2E=1` 时真实依赖用例仍通过（无回归）
+
+**Exit Criteria**:
+- 关键异常路径具备自动修复入口，日志字段可用于跨链路定位问题

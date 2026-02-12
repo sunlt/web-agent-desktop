@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createLogger, type Logger } from "../observability/logger.js";
 import type { RunQueueRepository } from "../repositories/run-queue-repository.js";
 import type {
   RunQueueItem,
@@ -36,6 +37,7 @@ export class RunQueueManager {
   private readonly owner: string;
   private readonly lockMs: number;
   private readonly retryDelayMs: number;
+  private readonly logger: Logger;
 
   constructor(
     private readonly repo: RunQueueRepository,
@@ -44,11 +46,16 @@ export class RunQueueManager {
       owner?: string;
       lockMs?: number;
       retryDelayMs?: number;
+      logger?: Logger;
     } = {},
   ) {
     this.owner = options.owner ?? `manager-${process.pid}`;
     this.lockMs = options.lockMs ?? 15_000;
     this.retryDelayMs = options.retryDelayMs ?? 1_000;
+    this.logger = (options.logger ?? createLogger()).child({
+      component: "run-queue-manager",
+      owner: this.owner,
+    });
   }
 
   async enqueueRun(input: EnqueueRunInput): Promise<EnqueueRunResult> {
@@ -106,6 +113,11 @@ export class RunQueueManager {
 
       claimed += 1;
       const result = await this.processClaimedItem(item, retryDelayMs);
+      this.logger.info("run queue item processed", {
+        runId: item.runId,
+        sessionId: item.sessionId,
+        result,
+      });
       if (result === "succeeded") {
         succeeded += 1;
       } else if (result === "retried") {
