@@ -66,6 +66,14 @@ type FileReadPayload = {
   truncated: boolean;
 };
 
+type StoreApp = {
+  appId: string;
+  name: string;
+  enabled: boolean;
+  canView: boolean;
+  canUse: boolean;
+};
+
 type MockApiState = {
   runId: string;
   pendingRequests: PendingRequest[];
@@ -79,6 +87,8 @@ type MockApiState = {
   fileEntries?: FileEntry[];
   fileReadByPath?: Record<string, FileReadPayload>;
   fileWrites?: Array<{ path: string; content: string }>;
+  storeApps?: StoreApp[];
+  runStartPayloads?: Array<Record<string, unknown>>;
 };
 
 test.describe("Portal Chat Workbench", () => {
@@ -208,6 +218,107 @@ test.describe("Portal Chat Workbench", () => {
 
     await expect(page.getByText("实现前端 E2E").first()).toBeVisible();
     await expect(page.locator(".todo-events")).toContainText("[done] #1 实现前端 E2E");
+  });
+
+  test("应用商店选择可联动 runs/start 参数", async ({ page }) => {
+    const runId = "run-e2e-store-1";
+    const now = "2026-02-12T14:40:00.000Z";
+
+    const mockState: MockApiState = {
+      runId,
+      pendingRequests: [],
+      todoItems: [],
+      todoEvents: [],
+      replyPayloads: [],
+      historyChats: [
+        {
+          chatId: "chat-e2e-store-1",
+          sessionId: "chat-e2e-store-1",
+          title: "商店会话",
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          createdAt: now,
+          updatedAt: now,
+          lastMessageAt: null,
+        },
+      ],
+      historyMessages: {
+        "chat-e2e-store-1": [],
+      },
+      sseBody: buildSseBody([
+        {
+          event: "run.status",
+          data: {
+            type: "run.status",
+            runId,
+            provider: "codex-cli",
+            status: "started",
+            ts: now,
+          },
+        },
+        {
+          event: "message.delta",
+          data: {
+            type: "message.delta",
+            runId,
+            provider: "codex-cli",
+            text: "ok",
+            ts: now,
+          },
+        },
+        {
+          event: "run.status",
+          data: {
+            type: "run.status",
+            runId,
+            provider: "codex-cli",
+            status: "finished",
+            detail: "succeeded",
+            ts: now,
+          },
+        },
+        {
+          event: "run.closed",
+          data: { runId },
+        },
+      ]),
+      storeApps: [
+        {
+          appId: "app-alpha",
+          name: "Alpha App",
+          enabled: true,
+          canView: true,
+          canUse: true,
+        },
+        {
+          appId: "app-beta",
+          name: "Beta App",
+          enabled: true,
+          canView: true,
+          canUse: true,
+        },
+      ],
+      runStartPayloads: [],
+    };
+
+    await mockPortalApi(page, mockState);
+    await page.goto("/");
+
+    const storePanel = page.locator(".panel").filter({ hasText: "应用商店" });
+    await expect(storePanel.getByText("Alpha App")).toBeVisible();
+    await storePanel.getByRole("button", { name: /Beta App/ }).click();
+
+    await page.getByPlaceholder("输入消息，Enter 发送，Shift+Enter 换行").fill("运行应用任务");
+    await page.getByRole("button", { name: "发送" }).click();
+    await expect(page.locator(".run-chip")).toContainText("succeeded");
+
+    expect(mockState.runStartPayloads).toHaveLength(1);
+    const payload = mockState.runStartPayloads[0] as {
+      executionProfile?: string;
+      providerOptions?: { storeAppId?: string };
+    };
+    expect(payload.executionProfile).toBe("app-beta");
+    expect(payload.providerOptions?.storeAppId).toBe("app-beta");
   });
 
   test("human-loop 待回复可提交并刷新为已清空", async ({ page }) => {
@@ -389,6 +500,8 @@ async function mockPortalApi(page: Page, state: MockApiState): Promise<void> {
   state.fileEntries ??= [];
   state.fileReadByPath ??= {};
   state.fileWrites ??= [];
+  state.storeApps ??= [];
+  state.runStartPayloads ??= [];
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -510,6 +623,17 @@ async function mockPortalApi(page: Page, state: MockApiState): Promise<void> {
           }),
         });
       }
+    }
+
+    if (path === "/api/apps/store" && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total: state.storeApps.length,
+          apps: state.storeApps,
+        }),
+      });
     }
 
     if (path === "/api/files/tree" && method === "GET") {
@@ -706,6 +830,12 @@ async function mockPortalApi(page: Page, state: MockApiState): Promise<void> {
     }
 
     if (path === "/api/runs/start" && method === "POST") {
+      const raw = request.postData() ?? "{}";
+      try {
+        state.runStartPayloads.push(JSON.parse(raw) as Record<string, unknown>);
+      } catch {
+        state.runStartPayloads.push({ raw });
+      }
       return route.fulfill({
         status: 200,
         headers: {

@@ -1068,3 +1068,56 @@
 
 ### next_phase
 - Phase 17 后续子阶段：应用商店接入 + human-loop UX 增强 + 流式断线重连/游标恢复。
+
+---
+
+## Phase 17: 应用商店接入与会话入口联动
+
+### objective
+- 在 ChatUI 内接入应用商店可见/可用列表，并将选中应用联动到 run 启动参数，形成“选应用 -> 发起会话/运行”闭环。
+
+### inputs
+- 后端已具备 `GET /api/apps/store?userId=...` 能力。
+- Phase 17 已完成历史会话与文件域接入，当前缺“应用商店接入”子任务。
+
+### actions
+- 前端 `portal`：
+  - 新增“应用商店”面板，按 `userId` 拉取可见应用并展示 `可用/仅可见` 状态。
+  - 支持切换当前应用（仅可用应用可选）。
+  - 新建会话时将应用名称写入默认会话标题（`[AppName] 新会话`）。
+  - 发送消息时将应用选择联动到 `/api/runs/start`：
+    - `executionProfile = appId`
+    - `providerOptions.storeAppId = appId`
+  - Run 状态面板补充当前应用显示。
+- 测试补齐：
+  - Playwright 新增用例验证“选择应用 -> 发送消息 -> runs/start 负载携带 appId”。
+  - mock API 新增 `/api/apps/store` 处理与 `runs/start` 请求体捕获。
+- 样式补齐：
+  - 新增应用商店面板样式（列表、激活态、状态信息）。
+
+### outputs
+- `portal/src/App.tsx`
+- `portal/src/styles.css`
+- `portal/e2e/tests/chat-workbench.spec.ts`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+- `TODO_PROVIDER_MIGRATION_AND_REMAINING_PLAN.md`
+
+### validation
+- commands:
+  - `cd portal && npm run build`
+  - `cd portal && npm test`
+  - `cd control-plane && npm test`
+- results:
+  - portal 构建通过。
+  - Playwright 4/4 通过（新增应用商店联动用例）。
+  - control-plane 测试通过（无回归）。
+
+### gate_result
+- **Pass**（应用商店展示与 run 入口参数联动已落地）
+
+### risks
+- 当前 run 侧仅透传 `executionProfile/providerOptions`，尚未在后端执行链路做强约束校验。
+- 应用选择按前端会话维度管理，尚未入库到 chat session 元数据。
+
+### next_phase
+- Phase 17 后续子阶段：human-loop 体验增强（超时/幂等反馈/resolved 历史）+ 流式断线重连与 cursor 恢复。

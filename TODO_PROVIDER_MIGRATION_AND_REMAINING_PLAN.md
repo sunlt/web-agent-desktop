@@ -147,7 +147,7 @@
 - [ ] 目前无独立 API Gateway/BFF 层，仍由 control-plane 直接承接。
 - [ ] `executor-manager` 与 `executor` 在部署形态上尚未完全拆分成设计中的清晰边界。
 - [ ] docker 编排已补齐 `portal + control-plane + postgres + rustfs + executor`，但 gateway/observability 仍未独立完成。
-- [ ] 前端商店、会话历史、流式协议消费仍与设计目标存在较大差距。
+- [ ] 前端流式稳定性（断线重连/游标恢复）与高级工作台交互仍与设计目标存在差距。
 
 ---
 

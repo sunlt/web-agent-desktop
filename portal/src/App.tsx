@@ -121,6 +121,8 @@ type RunStartConfig = {
   provider: ProviderKind;
   model: string;
   requireHumanLoop: boolean;
+  executionProfile?: string;
+  providerOptions?: Record<string, unknown>;
 };
 
 type HistoryStatus = "idle" | "loading" | "error";
@@ -173,6 +175,16 @@ type FileReadResult = {
 type FileListStatus = "idle" | "loading" | "error";
 type FilePreviewMode = "none" | "text" | "image" | "pdf" | "binary";
 
+type StoreAppItem = {
+  appId: string;
+  name: string;
+  enabled: boolean;
+  canView: boolean;
+  canUse: boolean;
+};
+
+type StoreStatus = "idle" | "loading" | "error";
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(
   /\/$/,
   "",
@@ -210,6 +222,10 @@ export default function App() {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [errorText, setErrorText] = useState<string>("");
   const [fileUserId, setFileUserId] = useState<string>("u-alice");
+  const [storeApps, setStoreApps] = useState<StoreAppItem[]>([]);
+  const [storeStatus, setStoreStatus] = useState<StoreStatus>("idle");
+  const [storeError, setStoreError] = useState<string>("");
+  const [activeAppId, setActiveAppId] = useState<string>("");
   const [fileTreePath, setFileTreePath] = useState<string>("/workspace/public");
   const [fileEntries, setFileEntries] = useState<FileTreeEntry[]>([]);
   const [fileListStatus, setFileListStatus] = useState<FileListStatus>("idle");
@@ -242,12 +258,21 @@ export default function App() {
   }, [activeChatId]);
 
   useEffect(() => {
-    runConfigRef.current = {
+    const baseConfig: RunStartConfig = {
       provider,
       model,
       requireHumanLoop,
     };
-  }, [provider, model, requireHumanLoop]);
+    if (activeAppId) {
+      runConfigRef.current = {
+        ...baseConfig,
+        executionProfile: activeAppId,
+        providerOptions: { storeAppId: activeAppId },
+      };
+      return;
+    }
+    runConfigRef.current = baseConfig;
+  }, [provider, model, requireHumanLoop, activeAppId]);
 
   const groupedTodos = useMemo(() => {
     const base: Record<TodoStatus, TodoItem[]> = {
@@ -270,6 +295,11 @@ export default function App() {
 
     return base;
   }, [todoItems]);
+
+  const activeStoreApp = useMemo(
+    () => storeApps.find((item) => item.appId === activeAppId) ?? null,
+    [activeAppId, storeApps],
+  );
 
   const appendTimeline = useCallback((label: string, ts?: string) => {
     const entry: TimelineEntry = {
@@ -311,6 +341,41 @@ export default function App() {
     },
     [],
   );
+
+  const refreshStoreApps = useCallback(async () => {
+    const userId = fileUserId.trim();
+    if (!userId) {
+      setStoreApps([]);
+      setStoreStatus("idle");
+      setStoreError("");
+      setActiveAppId("");
+      return;
+    }
+
+    setStoreStatus("loading");
+    setStoreError("");
+
+    try {
+      const result = await fetchJson<{ apps: StoreAppItem[] }>(
+        `/apps/store?userId=${encodeURIComponent(userId)}`,
+      );
+      const apps = result.apps ?? [];
+      setStoreApps(apps);
+      setStoreStatus("idle");
+      setActiveAppId((prev) => {
+        if (prev && apps.some((item) => item.appId === prev)) {
+          return prev;
+        }
+        const preferred =
+          apps.find((item) => item.canUse) ?? apps.find((item) => item.canView);
+        return preferred?.appId ?? "";
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStoreStatus("error");
+      setStoreError(message);
+    }
+  }, [fetchJson, fileUserId]);
 
   const activeFileDownloadUrl = useMemo(() => {
     if (!activeFilePath) {
@@ -807,6 +872,7 @@ export default function App() {
   const submitting = chatStatus === "submitted" || chatStatus === "streaming";
 
   const createHistorySession = useCallback(async () => {
+    const defaultTitle = activeStoreApp ? `[${activeStoreApp.name}] 新会话` : "新会话";
     const created = await fetchJson<{ chat: ChatHistorySummary }>(
       "/chat-opencode-history",
       {
@@ -817,13 +883,13 @@ export default function App() {
         body: JSON.stringify({
           provider,
           model,
-          title: "新会话",
+          title: defaultTitle,
         }),
       },
     );
     upsertHistorySummary(created.chat);
     return created.chat.chatId;
-  }, [fetchJson, model, provider, upsertHistorySummary]);
+  }, [activeStoreApp, fetchJson, model, provider, upsertHistorySummary]);
 
   const resetRunView = useCallback(() => {
     activeRunIdRef.current = null;
@@ -976,6 +1042,10 @@ export default function App() {
     };
   }, [activeRunId, runStatus, refreshRunPanels]);
 
+  useEffect(() => {
+    void refreshStoreApps();
+  }, [refreshStoreApps]);
+
   const handleSend = useCallback(
     async (event?: FormEvent) => {
       event?.preventDefault();
@@ -999,7 +1069,9 @@ export default function App() {
       setPendingRequests([]);
       setTimeline([]);
       clearError();
-      appendTimeline(`run.start (${provider})`);
+      appendTimeline(
+        `run.start (${provider}${activeStoreApp ? ` / app:${activeStoreApp.appId}` : ""})`,
+      );
 
       try {
         const chatId = await ensureActiveChat();
@@ -1030,6 +1102,7 @@ export default function App() {
     },
     [
       appendTimeline,
+      activeStoreApp,
       clearError,
       ensureActiveChat,
       input,
@@ -1119,7 +1192,7 @@ export default function App() {
       <header className="app-header">
         <div>
           <p className="eyebrow">Agent Workbench</p>
-          <h1>ChatUI · Todo · Human Loop · Files</h1>
+          <h1>ChatUI · Todo · Human Loop · Files · Store</h1>
         </div>
         <div className="run-chip" data-status={runStatus}>
           <span className="run-dot" />
@@ -1269,11 +1342,53 @@ export default function App() {
               <dd>{activeChatId ?? "-"}</dd>
               <dt>runId</dt>
               <dd>{activeRunId ?? "-"}</dd>
+              <dt>app</dt>
+              <dd>{activeStoreApp ? `${activeStoreApp.name} (${activeStoreApp.appId})` : "-"}</dd>
               <dt>status</dt>
               <dd>{runStatus}</dd>
               <dt>detail</dt>
               <dd>{runDetail || "-"}</dd>
             </dl>
+          </section>
+
+          <section className="panel">
+            <h3>应用商店</h3>
+            <div className="store-controls">
+              <button
+                type="button"
+                className="secondary"
+                disabled={storeStatus === "loading" || !fileUserId.trim()}
+                onClick={() => void refreshStoreApps()}
+              >
+                {storeStatus === "loading" ? "刷新中..." : "刷新应用"}
+              </button>
+            </div>
+            {storeError ? <p className="error-text">{storeError}</p> : null}
+            <div className="store-list">
+              {storeApps.length === 0 ? (
+                <p className="muted">当前用户无可见应用</p>
+              ) : (
+                storeApps.map((app) => (
+                  <button
+                    key={app.appId}
+                    type="button"
+                    className={`store-item ${activeAppId === app.appId ? "active" : ""}`}
+                    disabled={!app.canUse}
+                    onClick={() => setActiveAppId(app.appId)}
+                    title={app.canUse ? app.appId : "无使用权限"}
+                  >
+                    <strong>{app.name}</strong>
+                    <span>{app.appId}</span>
+                    <span>{app.canUse ? "可用" : "仅可见"}</span>
+                  </button>
+                ))
+              )}
+            </div>
+            {activeStoreApp ? (
+              <p className="muted">
+                新会话默认绑定应用：<code>{activeStoreApp.appId}</code>
+              </p>
+            ) : null}
           </section>
 
           <section className="panel">
@@ -1601,6 +1716,8 @@ function createControlPlaneTransport(input: {
           provider: runConfig.provider,
           model: runConfig.model,
           requireHumanLoop: runConfig.requireHumanLoop,
+          executionProfile: runConfig.executionProfile,
+          providerOptions: runConfig.providerOptions,
           messages: runMessages,
         }),
         signal: abortSignal ?? null,
