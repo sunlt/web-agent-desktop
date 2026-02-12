@@ -5,6 +5,7 @@ import type {
   ProviderRunHandle,
   ProviderRunInput,
 } from "../../src/providers/types.js";
+import { InMemoryRunCallbackRepository } from "../../src/repositories/in-memory-run-callback-repository.js";
 import { withHttpServer } from "./http-test-utils.js";
 
 class HumanLoopUnsupportedProvider implements AgentProviderAdapter {
@@ -263,6 +264,83 @@ describe("Human Loop E2E", () => {
       };
       expect(startBody.accepted).toBe(true);
       expect(startBody.snapshot.status).toBe("succeeded");
+    });
+  });
+
+  test("should cancel pending human-loop requests when run is stopped", async () => {
+    const callbackRepository = new InMemoryRunCallbackRepository();
+    const app = createControlPlaneApp({
+      callbackRepository,
+      providerAdapters: [new HumanLoopReplyProvider()],
+    });
+
+    await withHttpServer(app, async (baseUrl) => {
+      const runId = "run-human-loop-stop";
+      const questionId = "q-human-loop-stop-1";
+
+      const startPromise = fetch(`${baseUrl}/api/runs/start`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          runId,
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          messages: [{ role: "user", content: "等待 stop 触发取消" }],
+          requireHumanLoop: true,
+        }),
+      });
+
+      await sleep(30);
+
+      const bindResponse = await fetch(`${baseUrl}/api/runs/${runId}/bind`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: "sess-human-loop-stop" }),
+      });
+      expect(bindResponse.status).toBe(200);
+
+      const requested = await fetch(`${baseUrl}/api/runs/${runId}/callbacks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          eventId: "evt-human-loop-requested-stop-1",
+          type: "human_loop.requested",
+          questionId,
+          prompt: "请确认是否继续",
+        }),
+      });
+      expect(requested.status).toBe(200);
+
+      const stopResponse = await fetch(`${baseUrl}/api/runs/${runId}/stop`, {
+        method: "POST",
+      });
+      expect(stopResponse.status).toBe(200);
+      expect(await stopResponse.json()).toEqual({ ok: true });
+
+      const pending = await fetch(`${baseUrl}/api/human-loop/pending?runId=${runId}`);
+      expect(pending.status).toBe(200);
+      const pendingBody = (await pending.json()) as { total: number };
+      expect(pendingBody.total).toBe(0);
+
+      const canceled = await fetch(
+        `${baseUrl}/api/human-loop/requests?runId=${runId}&status=canceled`,
+      );
+      expect(canceled.status).toBe(200);
+      const canceledBody = (await canceled.json()) as {
+        total: number;
+        requests: Array<{ questionId: string; status: string; resolvedAt: string | null }>;
+      };
+      expect(canceledBody.total).toBe(1);
+      expect(canceledBody.requests[0]).toMatchObject({
+        questionId,
+        status: "canceled",
+      });
+      expect(canceledBody.requests[0]?.resolvedAt).not.toBeNull();
+
+      expect(callbackRepository.getRunStatus(runId)).toBe("canceled");
+
+      const startResponse = await startPromise;
+      expect(startResponse.status).toBe(200);
     });
   });
 });

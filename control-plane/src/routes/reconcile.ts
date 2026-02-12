@@ -12,6 +12,11 @@ const reconcileSyncSchema = z.object({
   limit: z.number().int().positive().max(500).optional(),
 });
 
+const reconcileHumanLoopTimeoutSchema = z.object({
+  timeoutMs: z.number().int().positive().max(24 * 60 * 60 * 1000),
+  limit: z.number().int().positive().max(500).optional(),
+});
+
 export function createReconcileRouter(reconciler: Reconciler): Router {
   const router = Router();
 
@@ -32,6 +37,16 @@ export function createReconcileRouter(reconciler: Reconciler): Router {
     }
 
     const result = await reconciler.reconcileStaleSync(parsed.data);
+    return res.json(result);
+  });
+
+  router.post("/reconcile/human-loop-timeout", async (req, res) => {
+    const parsed = reconcileHumanLoopTimeoutSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const result = await reconciler.reconcileHumanLoopTimeout(parsed.data);
     return res.json(result);
   });
 

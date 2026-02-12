@@ -139,7 +139,7 @@
 
 - [x] 前端工作台已重构为 React + TS + Vite，并接入 ChatUI + Todo + Human-loop（tmux 面板废弃）。
 - [x] 文件域已接入写能力（上传/重命名/删除/在线编辑）并补齐审计闭环。
-- [ ] `waiting_human` 超时策略与取消策略未落地（设计 24.3）。
+- [x] `waiting_human` 超时策略与取消策略已落地（设计 24.3）：新增 `POST /api/reconcile/human-loop-timeout`，并在 `POST /api/runs/:runId/stop` 时批量将 pending 请求置为 `canceled`。
 - [ ] run-level 对账/修复已具备基础能力，但缺更细粒度告警出口和指标看板。
 
 ## C. 架构级待完成（企业化）

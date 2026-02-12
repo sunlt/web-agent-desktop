@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
+import type { RunCallbackRepository } from "../repositories/run-callback-repository.js";
 import type {
   RunOrchestrator,
   RunOrchestratorEvent,
@@ -73,7 +74,10 @@ const restorePlanSchema = z.object({
   existingPaths: z.array(z.string().min(1)).optional(),
 });
 
-export function createRunsRouter(orchestrator: RunOrchestrator): Router {
+export function createRunsRouter(input: {
+  orchestrator: RunOrchestrator;
+  callbackRepo?: RunCallbackRepository;
+}): Router {
   const router = Router();
   const streamBus = new StreamBus<RunOrchestratorEvent>(2000);
   const pumpingRuns = new Set<string>();
@@ -125,11 +129,11 @@ export function createRunsRouter(orchestrator: RunOrchestrator): Router {
 
     const sseRequested = wantsSse(req.headers.accept);
     if (sseRequested) {
-      const started = await orchestrator.startRun(parsed.data);
+      const started = await input.orchestrator.startRun(parsed.data);
       if (!started.accepted) {
         return res.status(409).json(started);
       }
-      startRunPump(orchestrator, streamBus, pumpingRuns, started.runId);
+      startRunPump(input.orchestrator, streamBus, pumpingRuns, started.runId);
       return streamRunAsSse({
         req,
         res,
@@ -138,34 +142,61 @@ export function createRunsRouter(orchestrator: RunOrchestrator): Router {
       });
     }
 
-    const started = await orchestrator.startRun(parsed.data);
+    const started = await input.orchestrator.startRun(parsed.data);
 
     if (!started.accepted) {
       return res.status(409).json(started);
     }
 
     const events = [];
-    for await (const event of orchestrator.streamRun(started.runId)) {
+    for await (const event of input.orchestrator.streamRun(started.runId)) {
       events.push(event);
     }
 
     return res.json({
       ...started,
       events,
-      snapshot: orchestrator.getRunSnapshot(started.runId),
+      snapshot: input.orchestrator.getRunSnapshot(started.runId),
     });
   });
 
   router.post("/runs/:runId/stop", async (req, res) => {
-    const stopped = await orchestrator.stopRun(req.params.runId);
+    const stopped = await input.orchestrator.stopRun(req.params.runId);
     if (!stopped) {
       return res.status(404).json({ error: "run not found or not running" });
     }
+
+    if (input.callbackRepo) {
+      const callbackRepo = input.callbackRepo;
+      const now = new Date();
+      const pendingRequests = await callbackRepo.listPendingRequests({
+        runId: req.params.runId,
+        limit: 500,
+      });
+
+      await Promise.all(
+        pendingRequests.map((request) =>
+          callbackRepo.markRequestStatus({
+            questionId: request.questionId,
+            runId: request.runId,
+            status: "canceled",
+            resolvedAt: now,
+          }),
+        ),
+      );
+
+      await callbackRepo.updateRunStatus({
+        runId: req.params.runId,
+        status: "canceled",
+        updatedAt: now,
+      });
+    }
+
     return res.json({ ok: true });
   });
 
   router.get("/runs/:runId", async (req, res) => {
-    const snapshot = orchestrator.getRunSnapshot(req.params.runId);
+    const snapshot = input.orchestrator.getRunSnapshot(req.params.runId);
     if (!snapshot) {
       return res.status(404).json({ error: "run not found" });
     }
@@ -173,13 +204,13 @@ export function createRunsRouter(orchestrator: RunOrchestrator): Router {
   });
 
   router.get("/runs/:runId/stream", async (req, res) => {
-    const snapshot = orchestrator.getRunSnapshot(req.params.runId);
+    const snapshot = input.orchestrator.getRunSnapshot(req.params.runId);
     if (!snapshot) {
       return res.status(404).json({ error: "run not found" });
     }
 
     if (snapshot.status === "running") {
-      startRunPump(orchestrator, streamBus, pumpingRuns, req.params.runId);
+      startRunPump(input.orchestrator, streamBus, pumpingRuns, req.params.runId);
     }
 
     return streamRunAsSse({

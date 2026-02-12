@@ -1,5 +1,6 @@
 import type { Logger } from "../observability/logger.js";
 import { createLogger } from "../observability/logger.js";
+import type { RunCallbackRepository } from "../repositories/run-callback-repository.js";
 import type { RunQueueRepository } from "../repositories/run-queue-repository.js";
 import type { SessionWorkerRepository } from "../repositories/session-worker-repository.js";
 
@@ -40,11 +41,24 @@ export interface ReconcileStaleSyncResult {
   readonly failed: number;
 }
 
+export interface ReconcileHumanLoopTimeoutInput {
+  readonly now?: Date;
+  readonly timeoutMs: number;
+  readonly limit?: number;
+}
+
+export interface ReconcileHumanLoopTimeoutResult {
+  readonly pending: number;
+  readonly expired: number;
+  readonly failedRuns: number;
+}
+
 export class Reconciler {
   private readonly logger: Logger;
 
   constructor(
     private readonly runQueueRepository: RunQueueRepository,
+    private readonly callbackRepository: RunCallbackRepository,
     private readonly sessionWorkerRepository: SessionWorkerRepository,
     private readonly syncService: SessionSyncService,
     options: ReconcilerOptions = {},
@@ -150,6 +164,56 @@ export class Reconciler {
       succeeded,
       skipped,
       failed,
+    };
+  }
+
+  async reconcileHumanLoopTimeout(
+    input: ReconcileHumanLoopTimeoutInput,
+  ): Promise<ReconcileHumanLoopTimeoutResult> {
+    const now = input.now ?? new Date();
+    const timeoutMs = Math.max(1, input.timeoutMs);
+    const limit = Math.max(1, input.limit ?? 200);
+    const cutoff = new Date(now.getTime() - timeoutMs);
+
+    const pendingRequests = await this.callbackRepository.listRequests({
+      status: "pending",
+      limit,
+    });
+    const timedOutRequests = pendingRequests.filter(
+      (request) => request.requestedAt.getTime() <= cutoff.getTime(),
+    );
+
+    const failedRunIds = new Set<string>();
+
+    for (const request of timedOutRequests) {
+      await this.callbackRepository.markRequestStatus({
+        questionId: request.questionId,
+        runId: request.runId,
+        status: "expired",
+        resolvedAt: now,
+      });
+      failedRunIds.add(request.runId);
+
+      this.logger.warn("human-loop request expired", {
+        runId: request.runId,
+        questionId: request.questionId,
+        requestedAt: request.requestedAt.toISOString(),
+        timeoutMs,
+      });
+    }
+
+    for (const runId of failedRunIds) {
+      await this.callbackRepository.updateRunStatus({
+        runId,
+        status: "failed",
+        updatedAt: now,
+      });
+    }
+
+    return {
+      pending: pendingRequests.length,
+      expired: timedOutRequests.length,
+      failedRuns: failedRunIds.size,
     };
   }
 }

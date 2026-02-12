@@ -319,16 +319,30 @@ export class PostgresRunCallbackRepository
     runId: string;
     resolvedAt: Date;
   }): Promise<void> {
+    await this.markRequestStatus({
+      questionId: input.questionId,
+      runId: input.runId,
+      status: "resolved",
+      resolvedAt: input.resolvedAt,
+    });
+  }
+
+  async markRequestStatus(input: {
+    questionId: string;
+    runId: string;
+    status: Exclude<HumanLoopRequestStatus, "pending">;
+    resolvedAt: Date;
+  }): Promise<void> {
     await this.pool.query(
       `
         UPDATE human_loop_requests
-        SET status = 'resolved',
-            resolved_at = $3,
-            updated_at = $3
+        SET status = $3,
+            resolved_at = $4,
+            updated_at = $4
         WHERE question_id = $1
           AND run_id = $2
       `,
-      [input.questionId, input.runId, input.resolvedAt],
+      [input.questionId, input.runId, input.status, input.resolvedAt],
     );
   }
 

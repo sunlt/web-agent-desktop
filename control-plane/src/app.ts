@@ -107,6 +107,7 @@ export function createControlPlaneApp(
   );
   const reconciler = new Reconciler(
     runQueueRepository,
+    callbackRepository,
     sessionWorkerRepository,
     lifecycleManager,
     {
@@ -124,7 +125,13 @@ export function createControlPlaneApp(
 
   app.use(createHealthRouter());
   app.use("/api", createSessionWorkersRouter(lifecycleManager));
-  app.use("/api", createRunsRouter(runOrchestrator));
+  app.use(
+    "/api",
+    createRunsRouter({
+      orchestrator: runOrchestrator,
+      callbackRepo: callbackRepository,
+    }),
+  );
   app.use("/api", createRunQueueRouter(runQueueManager));
   app.use("/api", createReconcileRouter(reconciler));
   app.use("/api", createChatHistoryRouter(chatHistoryRepository));

@@ -141,6 +141,13 @@ export interface HumanLoopRepository {
     readonly resolvedAt: Date;
   }): Promise<void>;
 
+  markRequestStatus(input: {
+    readonly questionId: string;
+    readonly runId: string;
+    readonly status: Exclude<HumanLoopRequestStatus, "pending">;
+    readonly resolvedAt: Date;
+  }): Promise<void>;
+
   listPendingRequests(input: {
     readonly runId?: string;
     readonly limit?: number;

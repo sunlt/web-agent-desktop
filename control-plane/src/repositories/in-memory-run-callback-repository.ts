@@ -214,6 +214,20 @@ export class InMemoryRunCallbackRepository
     runId: string;
     resolvedAt: Date;
   }): Promise<void> {
+    await this.markRequestStatus({
+      questionId: input.questionId,
+      runId: input.runId,
+      status: "resolved",
+      resolvedAt: input.resolvedAt,
+    });
+  }
+
+  async markRequestStatus(input: {
+    questionId: string;
+    runId: string;
+    status: Exclude<HumanLoopRequestStatus, "pending">;
+    resolvedAt: Date;
+  }): Promise<void> {
     const existing = this.humanLoopRequests.get(input.questionId);
     if (!existing || existing.runId !== input.runId) {
       return;
@@ -221,7 +235,7 @@ export class InMemoryRunCallbackRepository
 
     this.humanLoopRequests.set(input.questionId, {
       ...existing,
-      status: "resolved",
+      status: input.status,
       resolvedAt: input.resolvedAt,
     });
   }

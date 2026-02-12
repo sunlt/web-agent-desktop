@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { createControlPlaneApp } from "../../src/app.js";
 import { createSessionWorker } from "../../src/domain/session-worker.js";
+import { InMemoryRunCallbackRepository } from "../../src/repositories/in-memory-run-callback-repository.js";
 import { InMemoryRunQueueRepository } from "../../src/repositories/in-memory-run-queue-repository.js";
 import { InMemorySessionWorkerRepository } from "../../src/repositories/in-memory-session-worker-repository.js";
 import { withHttpServer } from "./http-test-utils.js";
@@ -90,5 +91,76 @@ describe("Reconcile API E2E", () => {
     const worker = await sessionWorkerRepository.findBySessionId(sessionId);
     expect(worker?.lastSyncStatus).toBe("success");
     expect(worker?.lastSyncAt).not.toBeNull();
+  });
+
+  test("should expire timed-out human-loop requests and fail related runs", async () => {
+    const callbackRepository = new InMemoryRunCallbackRepository();
+    const app = createControlPlaneApp({
+      callbackRepository,
+    });
+
+    const staleRunId = "run-reconcile-human-loop-stale";
+    const freshRunId = "run-reconcile-human-loop-fresh";
+    const now = Date.now();
+    const staleRequestedAt = new Date(now - 2 * 60_000);
+    const freshRequestedAt = new Date(now - 2_000);
+
+    await callbackRepository.bindRun(staleRunId, "sess-reconcile-human-loop-stale");
+    await callbackRepository.bindRun(freshRunId, "sess-reconcile-human-loop-fresh");
+
+    await callbackRepository.updateRunStatus({
+      runId: staleRunId,
+      status: "waiting_human",
+    });
+    await callbackRepository.updateRunStatus({
+      runId: freshRunId,
+      status: "waiting_human",
+    });
+
+    await callbackRepository.upsertPendingRequest({
+      questionId: "q-reconcile-human-loop-stale",
+      runId: staleRunId,
+      sessionId: "sess-reconcile-human-loop-stale",
+      prompt: "stale request",
+      metadata: {},
+      requestedAt: staleRequestedAt,
+    });
+    await callbackRepository.upsertPendingRequest({
+      questionId: "q-reconcile-human-loop-fresh",
+      runId: freshRunId,
+      sessionId: "sess-reconcile-human-loop-fresh",
+      prompt: "fresh request",
+      metadata: {},
+      requestedAt: freshRequestedAt,
+    });
+
+    await withHttpServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/reconcile/human-loop-timeout`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          timeoutMs: 60_000,
+          limit: 10,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        pending: 2,
+        expired: 1,
+        failedRuns: 1,
+      });
+    });
+
+    const stale = callbackRepository.getHumanLoopRequest("q-reconcile-human-loop-stale");
+    expect(stale?.status).toBe("expired");
+    expect(stale?.resolvedAt).not.toBeNull();
+
+    const fresh = callbackRepository.getHumanLoopRequest("q-reconcile-human-loop-fresh");
+    expect(fresh?.status).toBe("pending");
+    expect(fresh?.resolvedAt).toBeNull();
+
+    expect(callbackRepository.getRunStatus(staleRunId)).toBe("failed");
+    expect(callbackRepository.getRunStatus(freshRunId)).toBe("waiting_human");
   });
 });
