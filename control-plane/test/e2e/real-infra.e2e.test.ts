@@ -31,10 +31,15 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
     bucket = process.env.REAL_E2E_BUCKET ?? `cp-e2e-${Date.now()}`;
 
     if (externalExecutorBaseUrl) {
+      const externalExecutorToken = process.env.REAL_EXECUTOR_TOKEN?.trim() || undefined;
+      await assertExternalExecutorHealthy({
+        baseUrl: externalExecutorBaseUrl,
+        token: externalExecutorToken,
+      });
       executorFixture = {
         mode: "external",
         baseUrl: externalExecutorBaseUrl.replace(/\/+$/, ""),
-        token: process.env.REAL_EXECUTOR_TOKEN?.trim() || undefined,
+        token: externalExecutorToken,
         bucket,
         getEvents: () => [],
         stop: async () => {},
@@ -510,4 +515,25 @@ async function applyMigrations(pool: Pool): Promise<void> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function assertExternalExecutorHealthy(input: {
+  baseUrl: string;
+  token?: string;
+}): Promise<void> {
+  const response = await fetch(
+    `${input.baseUrl.replace(/\/+$/, "")}/health`,
+    {
+      headers: input.token
+        ? {
+            authorization: `Bearer ${input.token}`,
+          }
+        : undefined,
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `external executor is not healthy: status=${response.status}`,
+    );
+  }
 }

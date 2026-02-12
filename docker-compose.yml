@@ -11,6 +11,12 @@ services:
       - PORT=3000
       - CONTROL_PLANE_STORAGE=postgres
       - CONTROL_PLANE_DOCKER=cli
+      - EXECUTOR_BASE_URL=http://executor:8090
+      - EXECUTOR_AUTH_TOKEN=executor-secret
+      - EXECUTOR_TIMEOUT_MS=30000
+      - EXECUTOR_MAX_RETRIES=1
+      - EXECUTOR_RETRY_DELAY_MS=200
+      - EXECUTOR_RETRY_STATUS_CODES=500,502,503,504
       - EXECUTOR_CONTAINER_IMAGE=agent-runtime:latest
       - EXECUTOR_CONTAINER_NETWORK=agent-network
       - PGHOST=pgsql
@@ -23,6 +29,31 @@ services:
     depends_on:
       - pgsql
       - agent-runtime
+      - executor
+    networks:
+      - agent-network
+    restart: always
+
+  executor:
+    build:
+      context: ./executor
+      dockerfile: Dockerfile
+    image: executor:latest
+    container_name: executor
+    ports:
+      - "8090:8090"
+    environment:
+      - EXECUTOR_PORT=8090
+      - EXECUTOR_AUTH_TOKEN=executor-secret
+      - EXECUTOR_WORKSPACE_ROOT=/tmp/executor-workspaces
+      - EXECUTOR_S3_ENDPOINT=http://rustfs:9000
+      - EXECUTOR_S3_REGION=us-east-1
+      - EXECUTOR_S3_FORCE_PATH_STYLE=true
+      - EXECUTOR_S3_ACCESS_KEY=rustfsadmin
+      - EXECUTOR_S3_SECRET_KEY=rustfsadmin
+      - EXECUTOR_S3_BUCKET=app
+    depends_on:
+      - rustfs
     networks:
       - agent-network
     restart: always
@@ -119,9 +150,12 @@ services:
     container_name: rustfs
     image: rustfs/rustfs:latest
     command: /data
+    environment:
+      - RUSTFS_ACCESS_KEY=rustfsadmin
+      - RUSTFS_SECRET_KEY=rustfsadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "19000:9000"
+      - "19001:9001"
     volumes:
       - rustfs_data:/data
     networks:

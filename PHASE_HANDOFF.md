@@ -778,3 +778,72 @@
 
 ### next_phase
 - Phase 15：接入真实 executor 服务并扩展 real E2E（含 human-loop 注入与 usage/trace 落库断言）。
+
+---
+
+## Phase 15: 真实 executor 服务接入与外部 real E2E
+
+### objective
+- 落地独立 executor 服务并接入 docker compose，使 real-infra E2E 支持外部 executor 模式。
+
+### inputs
+- 已完成 Phase 14 最小编排（portal + control-plane + pgsql）。
+- `control-plane` 已支持 `EXECUTOR_BASE_URL` / token / retry / timeout。
+
+### actions
+- 新增 `executor` 独立服务（TypeScript + Express）：
+  - `POST /workspace/restore`
+  - `POST /workspace/link-agent-data`
+  - `POST /workspace/validate`
+  - `POST /workspace/sync`
+  - `GET /health`
+  - `GET /events`
+- executor 支持可选 Bearer 鉴权（`EXECUTOR_AUTH_TOKEN`）。
+- executor 通过 S3 API 将 workspace 同步到 RustFS（`@aws-sdk/client-s3`）。
+- 更新 compose：
+  - 新增 `executor` 服务。
+  - `control-plane` 默认接入 `EXECUTOR_BASE_URL=http://executor:8090`。
+  - 新增 `EXECUTOR_AUTH_TOKEN` 等重试/超时配置。
+  - `rustfs` 补凭据环境变量。
+  - RustFS 宿主机端口调整为 `19000/19001`（避开已有 9000 端口占用）。
+- 更新 `control-plane` real E2E：
+  - 外部 executor 模式下新增 `/health` 预检查。
+- 新增 `control-plane` 脚本：
+  - `npm run test:e2e:external-executor`
+
+### outputs
+- `executor/package.json`
+- `executor/package-lock.json`
+- `executor/tsconfig.json`
+- `executor/.gitignore`
+- `executor/.dockerignore`
+- `executor/Dockerfile`
+- `executor/src/server.ts`
+- `docker-compose.yml`
+- `control-plane/package.json`
+- `control-plane/test/e2e/real-infra.e2e.test.ts`
+
+### validation
+- commands:
+  - `cd executor && npm run build`
+  - `cd control-plane && npm run build`
+  - `docker compose config`
+  - `docker compose build executor control-plane`
+  - `docker compose up -d rustfs executor pgsql control-plane`
+  - `cd control-plane && npm run test:e2e:external-executor`
+  - `cd control-plane && npm test`
+- results:
+  - executor/control-plane 构建通过。
+  - compose 配置/镜像构建通过。
+  - 外部 executor real E2E 通过（3/3）。
+  - control-plane 常规测试通过。
+
+### gate_result
+- **Pass**（真实 executor 服务与外部 E2E 链路可用）
+
+### risks
+- executor 仍是最小实现，尚未覆盖复杂权限、增量策略与大文件同步优化。
+- human-loop 注入场景在 external executor 模式下尚未补到 real E2E。
+
+### next_phase
+- Phase 16：补充前端 E2E（ChatUI + todo + human-loop）与 executor/网关观测增强。

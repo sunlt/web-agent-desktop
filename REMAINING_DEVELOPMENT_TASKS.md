@@ -204,6 +204,39 @@
 
 ---
 
+## Phase 15: 真实 executor 服务接入与外部 E2E（当前完成）
+**Type**: Infra + Real E2E
+**Estimated**: 4~8 小时
+**目标**: 引入独立 executor 服务并接入 compose，使 real-infra E2E 可在“外部 executor 模式”通过。
+
+**范围文件**:
+- `executor/src/server.ts`
+- `executor/package.json`
+- `executor/tsconfig.json`
+- `executor/Dockerfile`
+- `docker-compose.yml`
+- `control-plane/package.json`
+- `control-plane/test/e2e/real-infra.e2e.test.ts`
+
+**Tasks**:
+- [x] 新增独立 executor 服务（`restore/link/validate/sync`）。
+- [x] 支持 executor Bearer token 鉴权。
+- [x] executor 接入 RustFS S3，同步 workspace 到对象存储。
+- [x] compose 接入 `executor` 服务，`control-plane` 默认走 `EXECUTOR_BASE_URL`。
+- [x] 新增外部 executor real E2E 启动脚本（`test:e2e:external-executor`）。
+- [x] real E2E 在外部 executor 模式增加健康检查门禁。
+
+**Verification Criteria**:
+- [x] `docker compose build executor control-plane` 通过。
+- [x] `docker compose up -d rustfs executor pgsql control-plane` 通过。
+- [x] `cd control-plane && npm run test:e2e:external-executor` 通过。
+- [x] `cd control-plane && npm test` 通过。
+
+**Exit Criteria**:
+- 已具备独立 executor 服务与外部 real-infra E2E 验证能力。
+
+---
+
 ## 执行顺序
 1. Phase 8（已完成）
 2. Phase 9（已完成）
@@ -212,7 +245,8 @@
 5. Phase 12（已完成）
 6. Phase 13（已完成）
 7. Phase 14（已完成）
+8. Phase 15（已完成）
 
 ## 当前阶段
-- `in_progress`: Phase 15 规划中（真实 executor 服务接入与 E2E 增强）
-- `next_commit`: `feat(phase-14): wire control-plane and portal into docker compose`
+- `in_progress`: Phase 16 规划中（前端 E2E 与网关/观测增强）
+- `next_commit`: `feat(phase-15): add standalone executor service and external real e2e`

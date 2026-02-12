@@ -108,13 +108,13 @@
 - executor 服务仓库/目录（若在本仓则补 service）
 
 **任务清单**：
-- [ ] 在 compose 增加可启动的 `control-plane` + `executor` + `postgres` + `rustfs` 组合。
-- [ ] E2E 改为优先命中真实 executor HTTP（保留 fixture 作为 fallback）。
+- [x] 在 compose 增加可启动的 `control-plane` + `executor` + `postgres` + `rustfs` 组合。
+- [x] E2E 改为可命中真实 executor HTTP（保留 fixture 作为 fallback）。
 - [ ] 覆盖一次 human-loop 注入场景（pending + reply）。
 - [ ] 覆盖 workspace restore/sync + usage 落库 + trace 透传。
 
 **验收**：
-- [ ] `RUN_REAL_E2E=1 npm run test:e2e:real` 通过。
+- [x] `RUN_REAL_E2E=1 npm run test:e2e:real` 通过（外部 executor 模式）。
 - [ ] 关键表存在预期记录：`agent_runs`/`run_events`/`human_loop_requests`/`usage_logs`。
 
 **提交建议**：
@@ -133,7 +133,7 @@
 - [x] Todo 查询接口补齐：
   - `GET /runs/{run_id}/todos`
   - `GET /runs/{run_id}/todos/events`
-- [ ] 真实 executor 服务接入 real E2E（见 P3）。
+- [x] 真实 executor 服务接入 real E2E（见 P3）。
 
 ## B. 中优先级（平台可用性）
 
