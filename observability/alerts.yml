@@ -1,0 +1,38 @@
+groups:
+  - name: platform-health
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~".*-health"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Prometheus cannot scrape {{ $labels.job }} for more than 2 minutes."
+
+      - alert: ReconcileFailuresDetected
+        expr: increase(control_plane_reconcile_stale_runs_failed_total[10m]) > 0 or increase(control_plane_reconcile_stale_sync_failed_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Reconcile failures detected"
+          description: "Stale run or stale sync reconcile failures increased in the last 10 minutes."
+
+      - alert: HumanLoopTimeoutsDetected
+        expr: increase(control_plane_reconcile_human_loop_expired_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Human-loop timeouts detected"
+          description: "One or more human-loop requests expired in the last 10 minutes."
+
+      - alert: ReconcileStaleRunsInactive
+        expr: control_plane_reconcile_stale_runs_runs_total > 0 and (time() - control_plane_reconcile_stale_runs_last_run_timestamp_seconds > 1800)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Reconcile stale-runs has not executed recently"
+          description: "No stale-runs reconcile execution within the last 30 minutes."

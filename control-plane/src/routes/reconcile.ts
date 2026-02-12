@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import type { Reconciler } from "../services/reconciler.js";
+import { renderReconcileMetricsPrometheus } from "../services/reconcile-metrics-prometheus.js";
 
 const reconcileRunsSchema = z.object({
   limit: z.number().int().positive().max(500).optional(),
@@ -62,6 +63,17 @@ export function createReconcileRouter(reconciler: Reconciler): Router {
 
     const result = reconciler.getMetrics(parsed.data);
     return res.json(result);
+  });
+
+  router.get("/reconcile/metrics/prometheus", async (req, res) => {
+    const parsed = reconcileMetricsSchema.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const result = reconciler.getMetrics(parsed.data);
+    res.type("text/plain; version=0.0.4; charset=utf-8");
+    return res.send(renderReconcileMetricsPrometheus(result));
   });
 
   return router;

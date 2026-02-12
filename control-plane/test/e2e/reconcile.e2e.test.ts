@@ -115,6 +115,19 @@ describe("Reconcile API E2E", () => {
         failed: 0,
       });
       expect(metricsBody.alerts).toEqual([]);
+
+      const prometheusMetrics = await fetch(
+        `${baseUrl}/api/reconcile/metrics/prometheus?alertLimit=10`,
+      );
+      expect(prometheusMetrics.status).toBe(200);
+      expect(prometheusMetrics.headers.get("content-type")).toContain("text/plain");
+      const prometheusBody = await prometheusMetrics.text();
+      expect(prometheusBody).toContain(
+        "control_plane_reconcile_stale_runs_runs_total 1",
+      );
+      expect(prometheusBody).toContain(
+        "control_plane_reconcile_stale_sync_succeeded_total 1",
+      );
     });
 
     const run = await runQueueRepository.findByRunId(runId);
