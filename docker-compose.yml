@@ -99,7 +99,27 @@ services:
     environment:
       - GATEWAY_PORT=3001
       - GATEWAY_CONTROL_PLANE_URL=http://control-plane:3000
+      - GATEWAY_EXECUTOR_MANAGER_URL=http://executor-manager:3010
       - GATEWAY_UPSTREAM_TIMEOUT_MS=30000
+    depends_on:
+      - control-plane
+      - executor-manager
+    networks:
+      - agent-network
+    restart: always
+
+  executor-manager:
+    container_name: executor-manager
+    build:
+      context: ./executor-manager
+      dockerfile: Dockerfile
+    image: executor-manager:latest
+    ports:
+      - "3010:3010"
+    environment:
+      - EXECUTOR_MANAGER_PORT=3010
+      - EXECUTOR_MANAGER_CONTROL_PLANE_URL=http://control-plane:3000
+      - EXECUTOR_MANAGER_UPSTREAM_TIMEOUT_MS=30000
     depends_on:
       - control-plane
     networks:
@@ -116,6 +136,7 @@ services:
       - "80:80"
     depends_on:
       - gateway
+      - executor-manager
       - file-manager
       - mihomo
     networks:

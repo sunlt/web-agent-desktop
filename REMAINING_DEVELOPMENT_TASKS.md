@@ -309,7 +309,8 @@
 - [x] 新增独立 `gateway` 服务（TypeScript + Express），支持 `/api` 反向代理到 `control-plane`。
 - [x] `docker-compose` 接入 `gateway`，并调整 `portal -> gateway -> control-plane` 链路。
 - [x] pre-commit 检查纳入 `gateway` 的 lint/typecheck。
-- [ ] 拆分 `executor-manager` 与 `executor` 的部署与职责边界（从 control-plane 中抽离管理面）。
+- [x] 新增 `executor-manager` 独立服务并由 `gateway` 分流 `session-workers` 路由（delegated 模式）。
+- [ ] 将 `session-worker` 生命周期核心逻辑从 control-plane 完全迁移到 `executor-manager`（去除 delegated 依赖）。
 - [ ] 引入独立 observability 组件（集中日志/指标采集与查询出口）。
 
 **Verification Criteria**:
@@ -336,4 +337,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 18（网关/BFF 与部署边界拆分）
-- `next_commit`: `feat(phase-18): split executor-manager boundary from control-plane`
+- `next_commit`: `feat(phase-18): migrate session lifecycle core to executor-manager`

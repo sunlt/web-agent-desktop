@@ -1,25 +1,25 @@
 import express, { type Express } from "express";
 import { createProxyHandler } from "./proxy.js";
 
-export interface CreateGatewayAppOptions {
+export interface CreateExecutorManagerAppOptions {
   readonly controlPlaneBaseUrl?: string;
-  readonly executorManagerBaseUrl?: string;
   readonly upstreamTimeoutMs?: number;
 }
 
-export function createGatewayApp(options: CreateGatewayAppOptions = {}): Express {
+export function createExecutorManagerApp(
+  options: CreateExecutorManagerAppOptions = {},
+): Express {
   const app = express();
   app.disable("x-powered-by");
 
   const controlPlaneBaseUrl =
-    options.controlPlaneBaseUrl ?? process.env.GATEWAY_CONTROL_PLANE_URL ?? "http://127.0.0.1:3000";
-  const executorManagerBaseUrl =
-    options.executorManagerBaseUrl ??
-    process.env.GATEWAY_EXECUTOR_MANAGER_URL ??
-    "http://127.0.0.1:3010";
+    options.controlPlaneBaseUrl ??
+    process.env.EXECUTOR_MANAGER_CONTROL_PLANE_URL ??
+    "http://127.0.0.1:3000";
   const upstreamTimeoutMs = Math.max(
     1,
-    options.upstreamTimeoutMs ?? Number(process.env.GATEWAY_UPSTREAM_TIMEOUT_MS ?? 30_000),
+    options.upstreamTimeoutMs ??
+      Number(process.env.EXECUTOR_MANAGER_UPSTREAM_TIMEOUT_MS ?? 30_000),
   );
 
   app.use((req, res, next) => {
@@ -27,7 +27,7 @@ export function createGatewayApp(options: CreateGatewayAppOptions = {}): Express
     res.on("finish", () => {
       const payload = {
         ts: new Date().toISOString(),
-        component: "gateway",
+        component: "executor-manager",
         method: req.method,
         path: req.originalUrl,
         status: res.statusCode,
@@ -47,24 +47,15 @@ export function createGatewayApp(options: CreateGatewayAppOptions = {}): Express
   app.get("/health", (_req, res) => {
     res.json({
       ok: true,
-      service: "gateway",
+      service: "executor-manager",
+      mode: "delegated",
       controlPlaneBaseUrl,
-      executorManagerBaseUrl,
       upstreamTimeoutMs,
     });
   });
 
   app.use(
     "/api/session-workers",
-    createProxyHandler({
-      name: "executor-manager",
-      baseUrl: executorManagerBaseUrl,
-      timeoutMs: upstreamTimeoutMs,
-    }),
-  );
-
-  app.use(
-    "/api",
     createProxyHandler({
       name: "control-plane",
       baseUrl: controlPlaneBaseUrl,
