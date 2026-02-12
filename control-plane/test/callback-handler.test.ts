@@ -122,7 +122,7 @@ describe("CallbackHandler", () => {
 
     const todo = repo.getTodoItem("run-3", "todo-1");
     expect(todo?.status).toBe("doing");
-    expect(repo.listTodoEvents("run-3")).toHaveLength(1);
+    expect(repo.getTodoEvents("run-3")).toHaveLength(1);
   });
 
   test("should persist waiting_human request and resolve later", async () => {

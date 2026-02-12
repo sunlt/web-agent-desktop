@@ -66,6 +66,10 @@ const replySchema = z.object({
   answer: z.string().min(1),
 });
 
+const listTodosSchema = z.object({
+  limit: z.coerce.number().int().positive().max(500).optional(),
+});
+
 export function createRunCallbacksRouter(input: {
   callbackHandler: CallbackHandler;
   callbackRepo: RunCallbackRepository;
@@ -98,6 +102,42 @@ export function createRunCallbacksRouter(input: {
 
     const result = await input.callbackHandler.handle(event);
     return res.json(result);
+  });
+
+  router.get("/runs/:runId/todos", async (req, res) => {
+    const parsed = listTodosSchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const items = await input.callbackRepo.listTodoItems({
+      runId: req.params.runId,
+      limit: parsed.data.limit,
+    });
+
+    return res.json({
+      runId: req.params.runId,
+      total: items.length,
+      items,
+    });
+  });
+
+  router.get("/runs/:runId/todos/events", async (req, res) => {
+    const parsed = listTodosSchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const events = await input.callbackRepo.listTodoEvents({
+      runId: req.params.runId,
+      limit: parsed.data.limit,
+    });
+
+    return res.json({
+      runId: req.params.runId,
+      total: events.length,
+      events,
+    });
   });
 
   router.get("/human-loop/pending", async (req, res) => {

@@ -72,8 +72,36 @@ export class InMemoryRunCallbackRepository
     return this.todoItems.get(this.todoKey(runId, todoId));
   }
 
-  listTodoEvents(runId: string): InMemoryTodoEvent[] {
+  getTodoEvents(runId: string): InMemoryTodoEvent[] {
     return this.todoEvents.filter((item) => item.runId === runId);
+  }
+
+  async listTodoItems(input: {
+    runId: string;
+    limit?: number;
+  }): Promise<readonly InMemoryTodoItem[]> {
+    const items = Array.from(this.todoItems.values())
+      .filter((item) => item.runId === input.runId)
+      .sort((a, b) => {
+        if (a.order !== b.order) {
+          return a.order - b.order;
+        }
+        return a.updatedAt.getTime() - b.updatedAt.getTime();
+      });
+
+    const limit = input.limit ?? items.length;
+    return items.slice(0, limit);
+  }
+
+  async listTodoEvents(input: {
+    runId: string;
+    limit?: number;
+  }): Promise<readonly InMemoryTodoEvent[]> {
+    const events = this.todoEvents
+      .filter((item) => item.runId === input.runId)
+      .sort((a, b) => a.eventTs.getTime() - b.eventTs.getTime());
+    const limit = input.limit ?? events.length;
+    return events.slice(0, limit);
   }
 
   getHumanLoopRequest(questionId: string): InMemoryHumanLoopRequest | undefined {

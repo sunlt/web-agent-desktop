@@ -185,6 +185,96 @@ export class PostgresRunCallbackRepository
     );
   }
 
+  async listTodoItems(input: {
+    runId: string;
+    limit?: number;
+  }): Promise<
+    ReadonlyArray<{
+      runId: string;
+      todoId: string;
+      content: string;
+      status: TodoStatus;
+      order: number;
+      updatedAt: Date;
+    }>
+  > {
+    const hasLimit = typeof input.limit === "number";
+    const result = await this.pool.query<{
+      run_id: string;
+      todo_id: string;
+      content: string;
+      status: TodoStatus;
+      order_no: number;
+      updated_at: Date;
+    }>(
+      `
+        SELECT run_id, todo_id, content, status, order_no, updated_at
+        FROM todo_items
+        WHERE run_id = $1
+        ORDER BY order_no ASC, updated_at ASC
+        ${hasLimit ? "LIMIT $2" : ""}
+      `,
+      hasLimit ? [input.runId, input.limit] : [input.runId],
+    );
+
+    return result.rows.map((row) => ({
+      runId: row.run_id,
+      todoId: row.todo_id,
+      content: row.content,
+      status: row.status,
+      order: row.order_no,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  async listTodoEvents(input: {
+    runId: string;
+    limit?: number;
+  }): Promise<
+    ReadonlyArray<{
+      eventId: string;
+      runId: string;
+      todoId: string;
+      content: string;
+      status: TodoStatus;
+      order: number;
+      eventTs: Date;
+      payload: Record<string, unknown>;
+    }>
+  > {
+    const hasLimit = typeof input.limit === "number";
+    const result = await this.pool.query<{
+      event_id: string;
+      run_id: string;
+      todo_id: string;
+      content: string;
+      status: TodoStatus;
+      order_no: number;
+      event_ts: Date;
+      payload: Record<string, unknown> | null;
+    }>(
+      `
+        SELECT event_id, run_id, todo_id, content, status, order_no, event_ts, payload
+        FROM todo_item_events
+        WHERE run_id = $1
+        ORDER BY event_ts ASC, created_at ASC
+        ${hasLimit ? "LIMIT $2" : ""}
+      `,
+      hasLimit ? [input.runId, input.limit] : [input.runId],
+    );
+
+    return result.rows.map((row) => ({
+      eventId: row.event_id,
+      runId: row.run_id,
+      todoId: row.todo_id,
+      content: row.content,
+      status: row.status,
+      order: row.order_no,
+      eventTs: row.event_ts,
+      payload: row.payload ?? {},
+    }));
+  }
+
   async upsertPendingRequest(input: {
     questionId: string;
     runId: string;

@@ -60,13 +60,48 @@ describe("Todo Stream E2E", () => {
       expect(await done.json()).toMatchObject({
         action: "todo_upserted",
       });
+
+      const todoList = await fetch(`${baseUrl}/api/runs/run-todo-e2e/todos`);
+      expect(todoList.status).toBe(200);
+      const todoListBody = (await todoList.json()) as {
+        runId: string;
+        total: number;
+        items: Array<{ todoId: string; status: string; order: number }>;
+      };
+      expect(todoListBody).toMatchObject({
+        runId: "run-todo-e2e",
+        total: 1,
+      });
+      expect(todoListBody.items[0]).toMatchObject({
+        todoId: "todo-1",
+        status: "done",
+        order: 1,
+      });
+
+      const todoEvents = await fetch(
+        `${baseUrl}/api/runs/run-todo-e2e/todos/events`,
+      );
+      expect(todoEvents.status).toBe(200);
+      const todoEventsBody = (await todoEvents.json()) as {
+        runId: string;
+        total: number;
+        events: Array<{ eventId: string; todoId: string; status: string }>;
+      };
+      expect(todoEventsBody).toMatchObject({
+        runId: "run-todo-e2e",
+        total: 2,
+      });
+      expect(todoEventsBody.events.map((item) => item.eventId)).toEqual([
+        "evt-todo-doing",
+        "evt-todo-done",
+      ]);
     });
 
     const latest = callbackRepository.getTodoItem("run-todo-e2e", "todo-1");
     expect(latest?.status).toBe("done");
     expect(latest?.content).toBe("编译项目");
 
-    const timeline = callbackRepository.listTodoEvents("run-todo-e2e");
+    const timeline = callbackRepository.getTodoEvents("run-todo-e2e");
     expect(timeline).toHaveLength(2);
     expect(timeline.map((item) => item.status)).toEqual(["doing", "done"]);
     expect(timeline.map((item) => item.todoId)).toEqual(["todo-1", "todo-1"]);
