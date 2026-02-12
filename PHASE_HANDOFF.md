@@ -496,3 +496,53 @@
 
 ### next_phase
 - Phase 10：升级 `/api/runs/start` 为 SSE 实时流（含断线重连游标与历史回放）。
+
+---
+
+## Phase 10: 流式执行协议升级（当前迭代切片 J）
+
+### objective
+- 把 run 执行从“聚合后返回”升级为“实时流返回”，并提供断线重连回放能力。
+
+### inputs
+- 已完成的 `RunOrchestrator`
+- 已完成的 Phase 9 queue 能力（run 生命周期可重复触发）
+
+### actions
+- 新增 `StreamBus`（内存事件总线）：
+  - 为每个 run 维护递增 `seq`
+  - 保存历史事件并支持 `afterSeq` 回放
+  - 支持 stream close 通知
+- 升级 `runs` 路由：
+  - `POST /api/runs/start` 在 `Accept: text/event-stream` 下返回 SSE
+  - 非 SSE 保持原 JSON 聚合模式（向后兼容）
+  - 新增 `GET /api/runs/:runId/stream` 用于断线重连
+  - 支持 `cursor` 查询参数或 `last-event-id` header 继续消费
+- 新增 `runs-stream` E2E：
+  - 验证 SSE 事件可实时消费
+  - 验证 cursor 回放只返回游标后的事件
+
+### outputs
+- `control-plane/src/services/stream-bus.ts`
+- `control-plane/src/routes/runs.ts`
+- `control-plane/test/e2e/runs-stream.e2e.test.ts`
+
+### validation
+- commands:
+  - `npm run build`
+  - `npm test`
+  - `npm run test:e2e:real`
+- results:
+  - TypeScript 构建通过
+  - Vitest 常规集通过（新增 runs-stream E2E）
+  - 真实依赖 E2E 通过（既有联调能力无回归）
+
+### gate_result
+- **Pass**（SSE 实时流与断线回放能力已可用）
+
+### risks
+- 当前 `StreamBus` 为进程内内存实现，横向扩容后需要外部事件总线（Redis/Kafka/NATS 等）保证多实例回放一致性。
+- 尚未实现长连接限流与背压策略，极高并发下需补网关层保护。
+
+### next_phase
+- Phase 11：可观测性与对账修复（结构化日志 + stale run 自动修复）。

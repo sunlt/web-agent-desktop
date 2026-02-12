@@ -82,13 +82,13 @@
 - `control-plane/test/e2e/runs-stream.e2e.test.ts`（新增）
 
 **Tasks**:
-- [ ] 提供 SSE（优先）或 WS 事件流接口。
-- [ ] 输出标准化事件：`message/tool/todo/human_loop/run`。
-- [ ] 支持断线重连后的事件回放游标。
+- [x] 提供 SSE（优先）或 WS 事件流接口。
+- [x] 输出标准化事件：`message/tool/todo/human_loop/run`。
+- [x] 支持断线重连后的事件回放游标。
 
 **Verification Criteria**:
-- [ ] 流式事件按顺序到达，结束态一致。
-- [ ] `message.stop`、`todo.update`、`run.finished` 在流上可观察。
+- [x] 流式事件按顺序到达，结束态一致。
+- [x] `message.stop`、`todo.update`、`run.finished` 在流上可观察。
 
 **Exit Criteria**:
 - 前端可实时消费 run 过程，无需轮询聚合结果。
@@ -149,10 +149,10 @@
 ## 执行顺序
 1. Phase 8（已完成）
 2. Phase 9（已完成）
-3. Phase 10
+3. Phase 10（已完成）
 4. Phase 11
 5. Phase 12
 
 ## 当前阶段
-- `in_progress`: Phase 10
-- `next_commit`: `feat(phase-10): add runs sse streaming endpoint`
+- `in_progress`: Phase 11
+- `next_commit`: `feat(phase-11): add observability and reconciler jobs`

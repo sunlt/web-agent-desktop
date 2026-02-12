@@ -179,3 +179,23 @@
 
 **Exit Criteria**:
 - run 调度具备队列驱动基础能力，支持幂等入队、claim、重试与失败封顶
+
+## Phase 10: 流式执行协议升级（SSE）
+**Type**: API + E2E  
+**Estimated**: 4 小时  
+**Files**: `control-plane/src/services/stream-bus.ts`, `control-plane/src/routes/runs.ts`, `control-plane/test/e2e/runs-stream.e2e.test.ts`
+
+**Tasks**:
+- [x] 在 `/api/runs/start` 增加 SSE 模式（`Accept: text/event-stream`）
+- [x] 新增 `GET /api/runs/:runId/stream` 支持断线重连
+- [x] 引入内存 `StreamBus`，支持 `cursor/last-event-id` 回放
+- [x] 保留 JSON 聚合模式向后兼容
+- [x] 增加流式 E2E 覆盖事件顺序与 cursor 回放
+
+**Verification Criteria**:
+- [x] `npm run build` 通过
+- [x] `npm test` 通过（新增 `runs-stream` E2E）
+- [x] `RUN_REAL_E2E=1` 时真实依赖用例仍通过（无回归）
+
+**Exit Criteria**:
+- run 过程可实时订阅，断线后可按游标补齐事件
