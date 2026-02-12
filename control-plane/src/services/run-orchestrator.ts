@@ -131,6 +131,7 @@ export class RunOrchestrator {
     }
 
     const runInput: ProviderRunInput = {
+      runId,
       provider: input.provider,
       model: input.model,
       messages: input.messages,

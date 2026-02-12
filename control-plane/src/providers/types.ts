@@ -6,6 +6,7 @@ export interface ChatMessage {
 }
 
 export interface ProviderRunInput {
+  readonly runId: string;
   readonly provider: ProviderKind;
   readonly model: string;
   readonly messages: readonly ChatMessage[];
@@ -42,6 +43,12 @@ export interface ProviderRunHandle {
   stop(): Promise<void>;
 }
 
+export interface ProviderReplyInput {
+  readonly runId: string;
+  readonly questionId: string;
+  readonly answer: string;
+}
+
 export interface AgentProviderAdapter {
   readonly kind: ProviderKind;
   readonly capabilities: {
@@ -51,4 +58,5 @@ export interface AgentProviderAdapter {
     readonly buildPlanMode: boolean;
   };
   run(input: ProviderRunInput): Promise<ProviderRunHandle>;
+  reply?(input: ProviderReplyInput): Promise<void>;
 }
