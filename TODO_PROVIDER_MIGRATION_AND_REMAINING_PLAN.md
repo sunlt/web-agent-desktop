@@ -138,7 +138,7 @@
 ## B. 中优先级（平台可用性）
 
 - [x] 前端工作台已重构为 React + TS + Vite，并接入 ChatUI + Todo + Human-loop（tmux 面板废弃）。
-- [ ] 文件域仅有只读 `tree/download`，缺上传/重命名/删除/在线编辑接口与审计闭环。
+- [x] 文件域已接入写能力（上传/重命名/删除/在线编辑）并补齐审计闭环。
 - [ ] `waiting_human` 超时策略与取消策略未落地（设计 24.3）。
 - [ ] run-level 对账/修复已具备基础能力，但缺更细粒度告警出口和指标看板。
 
@@ -146,7 +146,7 @@
 
 - [ ] 目前无独立 API Gateway/BFF 层，仍由 control-plane 直接承接。
 - [ ] `executor-manager` 与 `executor` 在部署形态上尚未完全拆分成设计中的清晰边界。
-- [ ] docker 编排已补齐 `portal + control-plane + postgres + rustfs + agent-runtime`，但 executor/gateway/observability 仍未独立完成。
+- [ ] docker 编排已补齐 `portal + control-plane + postgres + rustfs + executor`，但 gateway/observability 仍未独立完成。
 - [ ] 前端商店、会话历史、流式协议消费仍与设计目标存在较大差距。
 
 ---

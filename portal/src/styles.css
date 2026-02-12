@@ -473,6 +473,145 @@ button.secondary {
   font-size: 13px;
 }
 
+.files-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.files-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.files-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+}
+
+.files-path-row input {
+  min-width: 0;
+}
+
+.files-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.upload-label {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #e8edf2;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.upload-label input {
+  display: none;
+}
+
+.file-list {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.file-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px;
+  display: grid;
+  gap: 6px;
+  background: var(--panel-soft);
+}
+
+.file-row.active {
+  border-color: var(--primary);
+}
+
+.file-entry {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.file-entry:hover {
+  text-decoration: underline;
+}
+
+.file-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.file-row-actions button {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.preview-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.preview-meta {
+  display: grid;
+  gap: 4px;
+}
+
+.preview-meta span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.file-editor {
+  width: 100%;
+  min-height: 220px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  resize: vertical;
+  font-size: 13px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  background: #fff;
+}
+
+.preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.preview-image {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.preview-frame {
+  width: 100%;
+  height: 360px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
 .muted {
   margin: 0;
   color: var(--muted);
@@ -493,6 +632,10 @@ button.secondary {
   }
 
   .todo-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .files-path-row {
     grid-template-columns: 1fr;
   }
 }

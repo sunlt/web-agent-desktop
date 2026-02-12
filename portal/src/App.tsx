@@ -6,6 +6,7 @@ import type {
   UIMessageChunk,
 } from "ai";
 import {
+  ChangeEvent,
   FormEvent,
   KeyboardEvent,
   useCallback,
@@ -143,12 +144,42 @@ type ChatHistoryMessage = {
   createdAt: string;
 };
 
+type FileTreeEntry = {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+};
+
+type FileTreeResult = {
+  path: string;
+  entries: FileTreeEntry[];
+};
+
+type FileReadResult = {
+  path: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+  offset: number;
+  limit: number;
+  readBytes: number;
+  nextOffset: number | null;
+  truncated: boolean;
+  encoding: "utf8" | "base64";
+  content: string;
+};
+
+type FileListStatus = "idle" | "loading" | "error";
+type FilePreviewMode = "none" | "text" | "image" | "pdf" | "binary";
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(
   /\/$/,
   "",
 );
 const POLL_MS = 3500;
 const MAX_TIMELINE = 200;
+const FILE_READ_LIMIT = 256 * 1024;
 
 const DEFAULT_MODEL: Record<ProviderKind, string> = {
   "codex-cli": "gpt-5.1-codex",
@@ -178,6 +209,16 @@ export default function App() {
 
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [errorText, setErrorText] = useState<string>("");
+  const [fileUserId, setFileUserId] = useState<string>("u-alice");
+  const [fileTreePath, setFileTreePath] = useState<string>("/workspace/public");
+  const [fileEntries, setFileEntries] = useState<FileTreeEntry[]>([]);
+  const [fileListStatus, setFileListStatus] = useState<FileListStatus>("idle");
+  const [fileError, setFileError] = useState<string>("");
+  const [fileBusy, setFileBusy] = useState<boolean>(false);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [activeFilePreview, setActiveFilePreview] = useState<FileReadResult | null>(null);
+  const [filePreviewMode, setFilePreviewMode] = useState<FilePreviewMode>("none");
+  const [fileDraft, setFileDraft] = useState<string>("");
 
   const activeRunIdRef = useRef<string | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
@@ -269,6 +310,315 @@ export default function App() {
       return (await response.json()) as T;
     },
     [],
+  );
+
+  const activeFileDownloadUrl = useMemo(() => {
+    if (!activeFilePath) {
+      return null;
+    }
+    return `${API_BASE}/files/download?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(activeFilePath)}`;
+  }, [activeFilePath, fileUserId]);
+
+  const activeFileInlineUrl = useMemo(() => {
+    if (!activeFilePath) {
+      return null;
+    }
+    return `${API_BASE}/files/download?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(activeFilePath)}&inline=1`;
+  }, [activeFilePath, fileUserId]);
+
+  const loadFileTree = useCallback(
+    async (path?: string) => {
+      const targetPath = normalizeUiPath(path ?? fileTreePath);
+      setFileListStatus("loading");
+      setFileError("");
+      try {
+        const tree = await fetchJson<FileTreeResult>(
+          `/files/tree?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(targetPath)}`,
+        );
+        setFileTreePath(tree.path);
+        setFileEntries(tree.entries ?? []);
+        setFileListStatus("idle");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setFileListStatus("error");
+        setFileError(message);
+      }
+    },
+    [fetchJson, fileTreePath, fileUserId],
+  );
+
+  const openFile = useCallback(
+    async (path: string, offset?: number) => {
+      const normalizedPath = normalizeUiPath(path);
+      setFileBusy(true);
+      setFileError("");
+      try {
+        const read = await fetchJson<FileReadResult>(
+          `/files/file?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(normalizedPath)}&limit=${FILE_READ_LIMIT}${offset ? `&offset=${offset}` : ""}`,
+        );
+        const mode = resolveFilePreviewMode(read.path, read.contentType, read.encoding);
+
+        setActiveFilePath(read.path);
+        setFilePreviewMode(mode);
+
+        if (offset && activeFilePreview) {
+          const mergedContent = `${activeFilePreview.content}${read.content}`;
+          const merged: FileReadResult = {
+            ...read,
+            offset: 0,
+            readBytes: activeFilePreview.readBytes + read.readBytes,
+            content: mergedContent,
+          };
+          setActiveFilePreview(merged);
+          if (mode === "text") {
+            setFileDraft(mergedContent);
+          }
+        } else {
+          setActiveFilePreview(read);
+          if (mode === "text") {
+            setFileDraft(read.content);
+          } else {
+            setFileDraft("");
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setFileError(message);
+      } finally {
+        setFileBusy(false);
+      }
+    },
+    [activeFilePreview, fetchJson, fileUserId],
+  );
+
+  const handleLoadMoreFile = useCallback(async () => {
+    if (
+      !activeFilePreview ||
+      activeFilePreview.encoding !== "utf8" ||
+      activeFilePreview.nextOffset === null
+    ) {
+      return;
+    }
+    await openFile(activeFilePreview.path, activeFilePreview.nextOffset);
+  }, [activeFilePreview, openFile]);
+
+  const saveActiveFile = useCallback(async () => {
+    if (!activeFilePath || filePreviewMode !== "text") {
+      return;
+    }
+    setFileBusy(true);
+    setFileError("");
+    try {
+      await fetchJson<{ ok: boolean }>(`/files/file`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: fileUserId,
+          path: activeFilePath,
+          content: fileDraft,
+          encoding: "utf8",
+        }),
+      });
+      appendTimeline(`file.write: ${activeFilePath}`);
+      await Promise.all([openFile(activeFilePath), loadFileTree(fileTreePath)]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFileError(message);
+    } finally {
+      setFileBusy(false);
+    }
+  }, [
+    activeFilePath,
+    appendTimeline,
+    fetchJson,
+    fileDraft,
+    filePreviewMode,
+    fileTreePath,
+    fileUserId,
+    loadFileTree,
+    openFile,
+  ]);
+
+  const createDirectory = useCallback(async () => {
+    const nextPath = window.prompt("新目录路径", joinUiPath(fileTreePath, "new-folder"));
+    if (!nextPath) {
+      return;
+    }
+    setFileBusy(true);
+    setFileError("");
+    try {
+      await fetchJson<{ ok: boolean; path: string }>(`/files/mkdir`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: fileUserId,
+          path: nextPath,
+        }),
+      });
+      appendTimeline(`file.mkdir: ${nextPath}`);
+      await loadFileTree(fileTreePath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFileError(message);
+    } finally {
+      setFileBusy(false);
+    }
+  }, [appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree]);
+
+  const createTextFile = useCallback(async () => {
+    const nextPath = window.prompt("新文件路径", joinUiPath(fileTreePath, "untitled.txt"));
+    if (!nextPath) {
+      return;
+    }
+    setFileBusy(true);
+    setFileError("");
+    try {
+      await fetchJson<{ ok: boolean; path: string }>(`/files/file`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: fileUserId,
+          path: nextPath,
+          content: "",
+          encoding: "utf8",
+        }),
+      });
+      appendTimeline(`file.create: ${nextPath}`);
+      await loadFileTree(fileTreePath);
+      await openFile(nextPath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFileError(message);
+    } finally {
+      setFileBusy(false);
+    }
+  }, [appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree, openFile]);
+
+  const renamePath = useCallback(
+    async (path: string) => {
+      const nextPath = window.prompt("重命名为", path);
+      if (!nextPath || nextPath === path) {
+        return;
+      }
+      setFileBusy(true);
+      setFileError("");
+      try {
+        await fetchJson<{ ok: boolean; path: string; newPath: string }>(
+          `/files/rename`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              userId: fileUserId,
+              path,
+              newPath: nextPath,
+            }),
+          },
+        );
+        appendTimeline(`file.rename: ${path} -> ${nextPath}`);
+        if (activeFilePath === path) {
+          await openFile(nextPath);
+        }
+        await loadFileTree(fileTreePath);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setFileError(message);
+      } finally {
+        setFileBusy(false);
+      }
+    },
+    [activeFilePath, appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree, openFile],
+  );
+
+  const deletePath = useCallback(
+    async (path: string) => {
+      if (!window.confirm(`确认删除 ${path} 吗？`)) {
+        return;
+      }
+      setFileBusy(true);
+      setFileError("");
+      try {
+        await fetchJson<{ ok: boolean; path: string }>(
+          `/files/file?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(path)}`,
+          {
+            method: "DELETE",
+          },
+        );
+        appendTimeline(`file.delete: ${path}`);
+        if (activeFilePath === path) {
+          setActiveFilePath(null);
+          setActiveFilePreview(null);
+          setFilePreviewMode("none");
+          setFileDraft("");
+        }
+        await loadFileTree(fileTreePath);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setFileError(message);
+      } finally {
+        setFileBusy(false);
+      }
+    },
+    [activeFilePath, appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree],
+  );
+
+  const uploadFile = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+
+      const targetPath = window.prompt("上传目标路径", joinUiPath(fileTreePath, file.name));
+      if (!targetPath) {
+        return;
+      }
+
+      setFileBusy(true);
+      setFileError("");
+      try {
+        const fileBuffer = new Uint8Array(await file.arrayBuffer());
+        await fetchJson<{ ok: boolean; path: string }>(`/files/upload`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            userId: fileUserId,
+            path: targetPath,
+            contentBase64: uint8ArrayToBase64(fileBuffer),
+          }),
+        });
+        appendTimeline(`file.upload: ${targetPath}`);
+        await loadFileTree(fileTreePath);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setFileError(message);
+      } finally {
+        setFileBusy(false);
+      }
+    },
+    [appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree],
+  );
+
+  const downloadPath = useCallback(
+    (path: string) => {
+      const url = `${API_BASE}/files/download?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(path)}`;
+      const popup = window.open(url, "_blank", "noopener");
+      if (!popup) {
+        window.location.href = url;
+      }
+    },
+    [fileUserId],
   );
 
   const upsertHistorySummary = useCallback((chat: ChatHistorySummary) => {
@@ -769,7 +1119,7 @@ export default function App() {
       <header className="app-header">
         <div>
           <p className="eyebrow">Agent Workbench</p>
-          <h1>ChatUI · Todo · Human Loop</h1>
+          <h1>ChatUI · Todo · Human Loop · Files</h1>
         </div>
         <div className="run-chip" data-status={runStatus}>
           <span className="run-dot" />
@@ -1002,6 +1352,204 @@ export default function App() {
                     </button>
                   </article>
                 ))}
+              </div>
+            )}
+          </section>
+
+          <section className="panel">
+            <h3>Files</h3>
+            <div className="files-controls">
+              <label>
+                userId
+                <input
+                  value={fileUserId}
+                  onChange={(event) => setFileUserId(event.target.value)}
+                  placeholder="u-alice"
+                />
+              </label>
+              <div className="files-path-row">
+                <input
+                  value={fileTreePath}
+                  onChange={(event) => setFileTreePath(event.target.value)}
+                  placeholder="/workspace/public"
+                />
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={fileBusy || !fileUserId.trim()}
+                  onClick={() => void loadFileTree(fileTreePath)}
+                >
+                  刷新
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={fileBusy || fileTreePath === "/"}
+                  onClick={() => void loadFileTree(parentUiPath(fileTreePath))}
+                >
+                  上级
+                </button>
+              </div>
+              <div className="files-action-row">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={fileBusy || !fileUserId.trim()}
+                  onClick={() => void createDirectory()}
+                >
+                  新建目录
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={fileBusy || !fileUserId.trim()}
+                  onClick={() => void createTextFile()}
+                >
+                  新建文件
+                </button>
+                <label className="upload-label">
+                  上传
+                  <input type="file" onChange={(event) => void uploadFile(event)} />
+                </label>
+              </div>
+            </div>
+            {fileListStatus === "loading" ? <p className="muted">文件列表加载中...</p> : null}
+            {fileError ? <p className="error-text">{fileError}</p> : null}
+            <div className="file-list">
+              {fileEntries.length === 0 ? (
+                <p className="muted">点击刷新加载文件列表</p>
+              ) : (
+                fileEntries.map((entry) => (
+                  <article
+                    key={entry.path}
+                    className={`file-row ${activeFilePath === entry.path ? "active" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="file-entry"
+                      onClick={() =>
+                        entry.isDirectory
+                          ? void loadFileTree(entry.path)
+                          : void openFile(entry.path)
+                      }
+                    >
+                      <span>{entry.isDirectory ? `📁 ${entry.name}` : entry.name}</span>
+                      <span>{entry.isDirectory ? "dir" : formatBytes(entry.size)}</span>
+                    </button>
+                    <div className="file-row-actions">
+                      {!entry.isDirectory ? (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={fileBusy}
+                          onClick={() => downloadPath(entry.path)}
+                        >
+                          下载
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={fileBusy}
+                        onClick={() => void renamePath(entry.path)}
+                      >
+                        重命名
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={fileBusy}
+                        onClick={() => void deletePath(entry.path)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="panel">
+            <h3>Preview</h3>
+            {!activeFilePath ? (
+              <p className="muted">选择文件后可预览与编辑</p>
+            ) : (
+              <div className="preview-panel">
+                <div className="preview-meta">
+                  <strong>{activeFilePath}</strong>
+                  <span>
+                    {activeFilePreview
+                      ? `${activeFilePreview.contentType} · ${formatBytes(activeFilePreview.size)}`
+                      : "-"}
+                  </span>
+                </div>
+                {filePreviewMode === "text" ? (
+                  <>
+                    <textarea
+                      className="file-editor"
+                      value={fileDraft}
+                      onChange={(event) => setFileDraft(event.target.value)}
+                      rows={10}
+                      disabled={fileBusy}
+                    />
+                    <div className="preview-actions">
+                      <button
+                        type="button"
+                        disabled={
+                          fileBusy ||
+                          !activeFilePreview ||
+                          activeFilePreview.truncated ||
+                          activeFilePreview.encoding !== "utf8"
+                        }
+                        onClick={() => void saveActiveFile()}
+                      >
+                        保存
+                      </button>
+                      {activeFilePreview?.nextOffset !== null ? (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={fileBusy}
+                          onClick={() => void handleLoadMoreFile()}
+                        >
+                          继续加载
+                        </button>
+                      ) : null}
+                      {activeFilePreview?.truncated ? (
+                        <p className="muted">当前为分段读取，加载完整后才可保存。</p>
+                      ) : null}
+                    </div>
+                  </>
+                ) : null}
+                {filePreviewMode === "image" && activeFileInlineUrl ? (
+                  <img
+                    src={activeFileInlineUrl}
+                    alt={activeFilePath}
+                    className="preview-image"
+                  />
+                ) : null}
+                {filePreviewMode === "pdf" && activeFileInlineUrl ? (
+                  <iframe
+                    title={activeFilePath}
+                    src={activeFileInlineUrl}
+                    className="preview-frame"
+                  />
+                ) : null}
+                {filePreviewMode === "binary" ? (
+                  <p className="muted">二进制文件不支持在线编辑，请使用下载查看。</p>
+                ) : null}
+                <div className="preview-actions">
+                  {activeFileDownloadUrl ? (
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => downloadPath(activeFilePath)}
+                    >
+                      下载文件
+                    </button>
+                  ) : null}
+                </div>
               </div>
             )}
           </section>
@@ -1390,6 +1938,73 @@ async function resolveResponseError(response: Response): Promise<string> {
   }
 
   return message;
+}
+
+function normalizeUiPath(path: string): string {
+  if (!path.trim()) {
+    return "/";
+  }
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+function joinUiPath(base: string, child: string): string {
+  const normalizedBase = normalizeUiPath(base);
+  if (normalizedBase === "/") {
+    return `/${child}`;
+  }
+  return `${normalizedBase}/${child}`.replace(/\/+/g, "/");
+}
+
+function parentUiPath(path: string): string {
+  const normalized = normalizeUiPath(path);
+  if (normalized === "/") {
+    return "/";
+  }
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length <= 1) {
+    return "/";
+  }
+  return `/${parts.slice(0, -1).join("/")}`;
+}
+
+function resolveFilePreviewMode(
+  path: string,
+  contentType: string,
+  encoding: "utf8" | "base64",
+): FilePreviewMode {
+  if (encoding === "utf8") {
+    return "text";
+  }
+
+  const lowerPath = path.toLowerCase();
+  if (contentType.startsWith("image/")) {
+    return "image";
+  }
+  if (contentType === "application/pdf" || lowerPath.endsWith(".pdf")) {
+    return "pdf";
+  }
+  return "binary";
+}
+
+function formatBytes(size: number): string {
+  if (!Number.isFinite(size) || size < 0) {
+    return "-";
+  }
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function uint8ArrayToBase64(input: Uint8Array): string {
+  let binary = "";
+  for (const item of input) {
+    binary += String.fromCharCode(item);
+  }
+  return btoa(binary);
 }
 
 function formatTime(value: string): string {

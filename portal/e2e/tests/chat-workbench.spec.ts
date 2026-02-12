@@ -49,6 +49,23 @@ type ChatMessage = {
   createdAt: string;
 };
 
+type FileEntry = {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+};
+
+type FileReadPayload = {
+  path: string;
+  content: string;
+  contentType: string;
+  encoding: "utf8" | "base64";
+  size: number;
+  nextOffset: number | null;
+  truncated: boolean;
+};
+
 type MockApiState = {
   runId: string;
   pendingRequests: PendingRequest[];
@@ -58,6 +75,10 @@ type MockApiState = {
   sseBody: string;
   historyChats: ChatSummary[];
   historyMessages: Record<string, ChatMessage[]>;
+  fileTreePath?: string;
+  fileEntries?: FileEntry[];
+  fileReadByPath?: Record<string, FileReadPayload>;
+  fileWrites?: Array<{ path: string; content: string }>;
 };
 
 test.describe("Portal Chat Workbench", () => {
@@ -288,10 +309,86 @@ test.describe("Portal Chat Workbench", () => {
       },
     ]);
   });
+
+  test("Files 面板支持读取与保存文本文件", async ({ page }) => {
+    const runId = "run-e2e-file-1";
+    const now = "2026-02-12T15:00:00.000Z";
+
+    const mockState: MockApiState = {
+      runId,
+      pendingRequests: [],
+      todoItems: [],
+      todoEvents: [],
+      replyPayloads: [],
+      historyChats: [
+        {
+          chatId: "chat-e2e-file-1",
+          sessionId: "chat-e2e-file-1",
+          title: "文件会话",
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          createdAt: now,
+          updatedAt: now,
+          lastMessageAt: null,
+        },
+      ],
+      historyMessages: {
+        "chat-e2e-file-1": [],
+      },
+      sseBody: "",
+      fileTreePath: "/workspace/public",
+      fileEntries: [
+        {
+          name: "readme.txt",
+          path: "/workspace/public/readme.txt",
+          isDirectory: false,
+          size: 12,
+        },
+      ],
+      fileReadByPath: {
+        "/workspace/public/readme.txt": {
+          path: "/workspace/public/readme.txt",
+          content: "hello file",
+          contentType: "text/plain; charset=utf-8",
+          encoding: "utf8",
+          size: 12,
+          nextOffset: null,
+          truncated: false,
+        },
+      },
+      fileWrites: [],
+    };
+
+    await mockPortalApi(page, mockState);
+    await page.goto("/");
+
+    const filesPanel = page.locator(".panel").filter({ hasText: "Files" });
+    await filesPanel.getByRole("button", { name: "刷新" }).click();
+    await filesPanel.getByRole("button", { name: /readme.txt/i }).click();
+
+    const preview = page.locator(".panel").filter({ hasText: "Preview" });
+    const editor = preview.locator(".file-editor");
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveValue("hello file");
+
+    await editor.fill("hello updated file");
+    await preview.getByRole("button", { name: "保存" }).click();
+
+    expect(mockState.fileWrites).toEqual([
+      {
+        path: "/workspace/public/readme.txt",
+        content: "hello updated file",
+      },
+    ]);
+    await expect(editor).toHaveValue("hello updated file");
+  });
 });
 
 async function mockPortalApi(page: Page, state: MockApiState): Promise<void> {
   let chatSequence = state.historyChats.length;
+  state.fileEntries ??= [];
+  state.fileReadByPath ??= {};
+  state.fileWrites ??= [];
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -413,6 +510,199 @@ async function mockPortalApi(page: Page, state: MockApiState): Promise<void> {
           }),
         });
       }
+    }
+
+    if (path === "/api/files/tree" && method === "GET") {
+      const targetPath = url.searchParams.get("path") ?? state.fileTreePath ?? "/";
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          path: targetPath,
+          entries: state.fileEntries,
+        }),
+      });
+    }
+
+    if (path === "/api/files/file" && method === "GET") {
+      const filePath = url.searchParams.get("path");
+      const filePayload = filePath ? state.fileReadByPath[filePath] : undefined;
+      if (!filePayload || !filePath) {
+        return route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "file not found" }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...filePayload,
+          fileName: filePath.split("/").at(-1) ?? "unknown",
+          offset: 0,
+          limit: filePayload.size,
+          readBytes: filePayload.size,
+        }),
+      });
+    }
+
+    if (path === "/api/files/file" && method === "PUT") {
+      const raw = request.postData() ?? "{}";
+      const payload = JSON.parse(raw) as {
+        path: string;
+        content: string;
+      };
+      state.fileWrites.push({
+        path: payload.path,
+        content: payload.content,
+      });
+      state.fileReadByPath[payload.path] = {
+        path: payload.path,
+        content: payload.content,
+        contentType: "text/plain; charset=utf-8",
+        encoding: "utf8",
+        size: payload.content.length,
+        nextOffset: null,
+        truncated: false,
+      };
+      if (!state.fileEntries.some((entry) => entry.path === payload.path)) {
+        state.fileEntries.push({
+          name: payload.path.split("/").at(-1) ?? payload.path,
+          path: payload.path,
+          isDirectory: false,
+          size: payload.content.length,
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          path: payload.path,
+          size: payload.content.length,
+        }),
+      });
+    }
+
+    if (path === "/api/files/upload" && method === "POST") {
+      const raw = request.postData() ?? "{}";
+      const payload = JSON.parse(raw) as {
+        path: string;
+        contentBase64: string;
+      };
+      const decoded = Buffer.from(payload.contentBase64, "base64").toString("utf8");
+      state.fileReadByPath[payload.path] = {
+        path: payload.path,
+        content: decoded,
+        contentType: "application/octet-stream",
+        encoding: "base64",
+        size: decoded.length,
+        nextOffset: null,
+        truncated: false,
+      };
+      if (!state.fileEntries.some((entry) => entry.path === payload.path)) {
+        state.fileEntries.push({
+          name: payload.path.split("/").at(-1) ?? payload.path,
+          path: payload.path,
+          isDirectory: false,
+          size: decoded.length,
+        });
+      }
+      return route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, path: payload.path }),
+      });
+    }
+
+    if (path === "/api/files/rename" && method === "POST") {
+      const raw = request.postData() ?? "{}";
+      const payload = JSON.parse(raw) as {
+        path: string;
+        newPath: string;
+      };
+      const filePayload = state.fileReadByPath[payload.path];
+      if (filePayload) {
+        state.fileReadByPath[payload.newPath] = {
+          ...filePayload,
+          path: payload.newPath,
+        };
+        delete state.fileReadByPath[payload.path];
+      }
+      state.fileEntries = state.fileEntries.map((entry) =>
+        entry.path === payload.path
+          ? {
+              ...entry,
+              path: payload.newPath,
+              name: payload.newPath.split("/").at(-1) ?? payload.newPath,
+            }
+          : entry,
+      );
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, path: payload.path, newPath: payload.newPath }),
+      });
+    }
+
+    if (path === "/api/files/file" && method === "DELETE") {
+      const filePath = url.searchParams.get("path") ?? "";
+      delete state.fileReadByPath[filePath];
+      state.fileEntries = state.fileEntries.filter((entry) => entry.path !== filePath);
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, path: filePath, deleted: true }),
+      });
+    }
+
+    if (path === "/api/files/mkdir" && method === "POST") {
+      const raw = request.postData() ?? "{}";
+      const payload = JSON.parse(raw) as {
+        path: string;
+      };
+      if (!state.fileEntries.some((entry) => entry.path === payload.path)) {
+        state.fileEntries.push({
+          name: payload.path.split("/").at(-1) ?? payload.path,
+          path: payload.path,
+          isDirectory: true,
+          size: 0,
+        });
+      }
+      return route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, path: payload.path }),
+      });
+    }
+
+    if (path === "/api/files/download" && method === "GET") {
+      const filePath = url.searchParams.get("path");
+      const filePayload = filePath ? state.fileReadByPath[filePath] : undefined;
+      if (!filePath || !filePayload) {
+        return route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "file not found" }),
+        });
+      }
+      if (filePayload.encoding === "base64") {
+        return route.fulfill({
+          status: 200,
+          headers: {
+            "content-type": filePayload.contentType,
+          },
+          body: Buffer.from(filePayload.content, "utf8"),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": filePayload.contentType,
+        },
+        body: filePayload.content,
+      });
     }
 
     if (path === "/api/runs/start" && method === "POST") {

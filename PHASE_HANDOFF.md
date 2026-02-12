@@ -1000,3 +1000,71 @@
 
 ### next_phase
 - Phase 17 后续子阶段：文件域编辑/预览能力 + 应用商店接入 + 历史会话权限隔离。
+
+---
+
+## Phase 17: 文件域可写能力与 ChatUI Files/Preview 接入
+
+### objective
+- 落地文件域写能力（读写/上传/重命名/删除/建目录）与审计闭环，并在前端工作台接入 Files/Preview 面板。
+
+### inputs
+- 已有文件只读接口：`GET /api/files/tree`、`GET /api/files/download`。
+- `REMAINING_DEVELOPMENT_TASKS.md` Phase 17 中“文件域/文件预览”任务待完成。
+
+### actions
+- 后端 `control-plane`：
+  - RBAC 仓储补齐 `canWritePath`（InMemory + Postgres）。
+  - `FileBrowser` 扩展可写能力与分页读取：
+    - `readFile` / `writeFile` / `rename` / `deletePath` / `mkdir`。
+  - 文件路由扩展：
+    - `GET /api/files/file`
+    - `PUT /api/files/file`
+    - `POST /api/files/upload`
+    - `POST /api/files/rename`
+    - `DELETE /api/files/file`
+    - `POST /api/files/mkdir`
+  - `download` 增加 `inline=1` 支持，供图片/PDF 内嵌预览。
+  - 新增 E2E 覆盖写链路与审计动作断言。
+- 前端 `portal`：
+  - 在 ChatUI 右侧新增 `Files` 面板（目录刷新/上级、上传、新建文件、新建目录、重命名、删除、下载）。
+  - 新增 `Preview` 面板：
+    - 文本读取与在线编辑保存。
+    - 图片/PDF 内嵌预览。
+    - 大文件分段读取（`继续加载`）。
+  - Playwright 增加 Files 用例，验证“读取 + 保存”闭环。
+- 文档状态同步：
+  - 更新 `REMAINING_DEVELOPMENT_TASKS.md` 与 `TODO_PROVIDER_MIGRATION_AND_REMAINING_PLAN.md` 的文件域完成状态。
+
+### outputs
+- `control-plane/src/repositories/rbac-repository.ts`
+- `control-plane/src/repositories/in-memory-rbac-repository.ts`
+- `control-plane/src/repositories/postgres-rbac-repository.ts`
+- `control-plane/src/services/file-browser.ts`
+- `control-plane/src/routes/files.ts`
+- `control-plane/test/e2e/apps-files-rbac.e2e.test.ts`
+- `portal/src/App.tsx`
+- `portal/src/styles.css`
+- `portal/e2e/tests/chat-workbench.spec.ts`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+- `TODO_PROVIDER_MIGRATION_AND_REMAINING_PLAN.md`
+
+### validation
+- commands:
+  - `cd control-plane && npm run build`
+  - `cd control-plane && npm test`
+  - `cd portal && npm run build`
+  - `cd portal && npm test`
+- results:
+  - control-plane 构建通过，测试通过（含 `apps-files-rbac.e2e` 写链路新增用例）。
+  - portal 构建通过，Playwright 3/3 通过（新增 Files 面板用例）。
+
+### gate_result
+- **Pass**（文件域写能力与前端 Files/Preview 基线可用）
+
+### risks
+- 文本预览尚未加入语法高亮；当前为纯文本编辑模式。
+- 图片/PDF 预览依赖 `download?inline=1`，后续可补独立 preview API 与缓存策略。
+
+### next_phase
+- Phase 17 后续子阶段：应用商店接入 + human-loop UX 增强 + 流式断线重连/游标恢复。

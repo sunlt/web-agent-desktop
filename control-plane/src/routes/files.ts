@@ -17,6 +17,7 @@ const treeSchema = z.object({
 const downloadSchema = z.object({
   userId: z.string().min(1),
   path: z.string().min(1),
+  inline: z.string().optional(),
 });
 
 const readFileSchema = z.object({
@@ -108,6 +109,7 @@ export function createFilesRouter(input: {
       parsed.data.userId,
       parsed.data.path,
     );
+    const inline = parsed.data.inline === "1" || parsed.data.inline === "true";
 
     await recordAudit(input.rbacRepository, {
       userId: parsed.data.userId,
@@ -127,7 +129,7 @@ export function createFilesRouter(input: {
       res.setHeader("content-type", file.contentType);
       res.setHeader(
         "content-disposition",
-        `attachment; filename="${encodeURIComponent(file.fileName)}"`,
+        `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(file.fileName)}"`,
       );
       return res.status(200).send(file.content);
     } catch (error) {
