@@ -679,3 +679,102 @@
 
 ### next_phase
 - 可选扩展：接入 RustFS 文件网关与预签名下载、完善 RBAC 管理 API、补告警与审计检索接口。
+
+---
+
+## Phase 13: 前端重构为 React + TS + Vite
+
+### objective
+- 废弃旧 `tmux/html/js` 门户，实现统一 ChatUI 前端并接入 run/todo/human-loop API。
+
+### inputs
+- 已完成 `runs` SSE、`todos` 查询、`human-loop` pending/reply 接口。
+- 用户要求：todo/human-loop 必须进入 ChatUI，tmux 面板废弃。
+
+### actions
+- 重建 `portal` 为 React + TypeScript + Vite 项目。
+- 实现 `ChatUI + Todo 分组 + Human-loop 回复面板 + Run timeline`。
+- 对接 API：
+  - `POST /api/runs/start`（SSE）
+  - `POST /api/runs/:runId/stop`
+  - `GET /api/runs/:runId/todos`
+  - `GET /api/runs/:runId/todos/events`
+  - `GET /api/human-loop/pending`
+  - `POST /api/human-loop/reply`
+- 删除旧静态入口：`tmux.html/script.js/style.css/winbox.bundle.min.js`。
+
+### outputs
+- `portal/src/App.tsx`
+- `portal/src/main.tsx`
+- `portal/src/styles.css`
+- `portal/src/vite-env.d.ts`
+- `portal/package.json`
+- `portal/tsconfig*.json`
+- `portal/vite.config.ts`
+- `portal/index.html`
+- `portal/nginx.conf`
+
+### validation
+- commands:
+  - `cd portal && npm run build`
+- results:
+  - Vite 构建通过。
+
+### gate_result
+- **Pass**（前端已完成 React 化并接入 todo/human-loop，tmux 面板已废弃）
+
+### risks
+- 目前前端仍未接入文件编辑、预览、usage 成本与更细粒度 tool 事件渲染。
+
+### next_phase
+- Phase 14：docker 编排补齐 `control-plane + portal` 运行闭环。
+
+---
+
+## Phase 14: Docker 编排补齐 control-plane + portal
+
+### objective
+- 形成最小可运行编排：`portal -> control-plane -> postgres`，并保留 `rustfs/agent-runtime` 基础服务。
+
+### inputs
+- 已完成前端 React 重构（Phase 13）。
+- 现有 compose 缺 `control-plane` 服务、portal 仍以源码卷挂载。
+
+### actions
+- 新增 `control-plane` 容器镜像与 `.dockerignore`。
+- 修正 `control-plane` 启动脚本：`node dist/src/server.js`。
+- 新增 `portal` 多阶段镜像与 `.dockerignore`（构建 Vite 后由 Nginx 托管）。
+- 更新 `portal/nginx.conf`：`/api` 代理改为 `control-plane:3000`。
+- 更新 `docker-compose.yml`：
+  - 增加 `control-plane` 服务（Postgres 模式 + Docker CLI + docker.sock）。
+  - `portal` 改为镜像构建模式并依赖 `control-plane`。
+  - `pgsql` 挂载 `001_init.sql` + `002_rbac_and_file_acl.sql` 初始化脚本。
+
+### outputs
+- `control-plane/Dockerfile`
+- `control-plane/.dockerignore`
+- `control-plane/package.json`
+- `portal/Dockerfile`
+- `portal/.dockerignore`
+- `portal/nginx.conf`
+- `docker-compose.yml`
+
+### validation
+- commands:
+  - `cd control-plane && npm run build`
+  - `cd portal && npm run build`
+  - `docker compose config`
+- results:
+  - `control-plane` TypeScript 构建通过。
+  - `portal` Vite 构建通过。
+  - compose 配置校验通过。
+
+### gate_result
+- **Pass**（最小编排链路已成型）
+
+### risks
+- 真实 executor 服务仍未在 compose 中独立落地，`EXECUTOR_BASE_URL` 仍需后续对接。
+- 尚未加入独立 gateway/observability 组件。
+
+### next_phase
+- Phase 15：接入真实 executor 服务并扩展 real E2E（含 human-loop 注入与 usage/trace 落库断言）。

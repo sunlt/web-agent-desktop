@@ -128,16 +128,16 @@
 
 ## A. 高优先级（应先做）
 
-- [ ] Codex App Server 真接入（见 P1）。
-- [ ] Human-loop 回复闭环（见 P2）。
-- [ ] Todo 查询接口补齐：
+- [x] Codex App Server 真接入（见 P1）。
+- [x] Human-loop 回复闭环（见 P2）。
+- [x] Todo 查询接口补齐：
   - `GET /runs/{run_id}/todos`
   - `GET /runs/{run_id}/todos/events`
 - [ ] 真实 executor 服务接入 real E2E（见 P3）。
 
 ## B. 中优先级（平台可用性）
 
-- [ ] 前端工作台仍为静态 portal，尚未实现设计里的 React ChatThread 架构与右侧多 Tab（Agent/Todo/Files/Preview/TTYD/Ask User）。
+- [x] 前端工作台已重构为 React + TS + Vite，并接入 ChatUI + Todo + Human-loop（tmux 面板废弃）。
 - [ ] 文件域仅有只读 `tree/download`，缺上传/重命名/删除/在线编辑接口与审计闭环。
 - [ ] `waiting_human` 超时策略与取消策略未落地（设计 24.3）。
 - [ ] run-level 对账/修复已具备基础能力，但缺更细粒度告警出口和指标看板。
@@ -146,7 +146,7 @@
 
 - [ ] 目前无独立 API Gateway/BFF 层，仍由 control-plane 直接承接。
 - [ ] `executor-manager` 与 `executor` 在部署形态上尚未完全拆分成设计中的清晰边界。
-- [ ] docker 编排未体现“平台全栈最小生产编排”（control-plane/executor/portal/gateway/observability）。
+- [ ] docker 编排已补齐 `portal + control-plane + postgres + rustfs + agent-runtime`，但 executor/gateway/observability 仍未独立完成。
 - [ ] 前端商店、会话历史、流式协议消费仍与设计目标存在较大差距。
 
 ---

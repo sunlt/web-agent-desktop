@@ -1,4 +1,32 @@
 services:
+  control-plane:
+    build:
+      context: ./control-plane
+      dockerfile: Dockerfile
+    image: control-plane:latest
+    container_name: control-plane
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - CONTROL_PLANE_STORAGE=postgres
+      - CONTROL_PLANE_DOCKER=cli
+      - EXECUTOR_CONTAINER_IMAGE=agent-runtime:latest
+      - EXECUTOR_CONTAINER_NETWORK=agent-network
+      - PGHOST=pgsql
+      - PGPORT=5432
+      - PGUSER=app
+      - PGPASSWORD=app123456
+      - PGDATABASE=app
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - pgsql
+      - agent-runtime
+    networks:
+      - agent-network
+    restart: always
+
   agent-runtime:
     build:
       context: .
@@ -56,12 +84,16 @@ services:
 
   portal:
     container_name: portal
-    image: docker.m.daocloud.io/library/nginx:alpine
+    build:
+      context: ./portal
+      dockerfile: Dockerfile
+    image: portal:latest
     ports:
       - "80:80"
-    volumes:
-      - ./portal:/usr/share/nginx/html
-      - ./portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - control-plane
+      - file-manager
+      - mihomo
     networks:
       - agent-network
     restart: always
@@ -77,6 +109,8 @@ services:
       - "5432:5432"
     volumes:
       - pgsql_data:/var/lib/postgresql/data
+      - ./control-plane/sql/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - ./control-plane/sql/002_rbac_and_file_acl.sql:/docker-entrypoint-initdb.d/002_rbac_and_file_acl.sql:ro
     networks:
       - agent-network
     restart: always

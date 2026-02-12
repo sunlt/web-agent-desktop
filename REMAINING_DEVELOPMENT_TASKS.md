@@ -146,13 +146,73 @@
 
 ---
 
+## Phase 13: 前端重构为 React + TS + Vite（已完成）
+**Type**: Frontend + Integration
+**Estimated**: 6~10 小时
+**目标**: 废弃旧 `tmux/html` 门户，统一为 ChatUI，并接入 run/todo/human-loop 接口。
+
+**范围文件**:
+- `portal/src/App.tsx`
+- `portal/src/main.tsx`
+- `portal/src/styles.css`
+- `portal/package.json`
+- `portal/vite.config.ts`
+- `portal/nginx.conf`
+
+**Tasks**:
+- [x] 重建 `portal` 为 React + TypeScript + Vite 项目结构。
+- [x] 接入 `POST /api/runs/start` SSE 流式消费。
+- [x] 接入 `GET /runs/:runId/todos`、`GET /runs/:runId/todos/events`。
+- [x] 接入 `GET /human-loop/pending`、`POST /human-loop/reply`。
+- [x] 删除旧 `tmux.html/script.js/style.css/winbox` 静态页面实现。
+
+**Verification Criteria**:
+- [x] `portal` 构建通过。
+
+**Exit Criteria**:
+- ChatUI 具备 run/todo/human-loop 一体化基础能力，tmux 面板路径废弃。
+
+---
+
+## Phase 14: Docker 编排补齐 control-plane + portal（当前完成）
+**Type**: Infra + Compose
+**Estimated**: 2~4 小时
+**目标**: 形成可启动的最小平台编排，打通 `portal -> control-plane -> postgres` 基础链路。
+
+**范围文件**:
+- `docker-compose.yml`
+- `control-plane/Dockerfile`
+- `control-plane/.dockerignore`
+- `portal/Dockerfile`
+- `portal/.dockerignore`
+- `portal/nginx.conf`
+- `control-plane/package.json`
+
+**Tasks**:
+- [x] 新增 `control-plane` 容器镜像，支持生产模式启动。
+- [x] 新增 `portal` 容器镜像，构建 Vite 产物并由 Nginx 托管。
+- [x] `portal` 的 `/api` 代理指向 `control-plane:3000`。
+- [x] `pgsql` 初始化挂载 `control-plane/sql/001_init.sql` 与 `002_rbac_and_file_acl.sql`。
+- [x] `docker-compose` 新增/更新服务依赖关系（`portal` 依赖 `control-plane`）。
+
+**Verification Criteria**:
+- [x] `docker compose config` 通过。
+- [x] `npm run build`（`control-plane`、`portal`）通过。
+
+**Exit Criteria**:
+- 编排层具备最小可运行拓扑，可在本地一键拉起前后端+DB 基础服务。
+
+---
+
 ## 执行顺序
 1. Phase 8（已完成）
 2. Phase 9（已完成）
 3. Phase 10（已完成）
 4. Phase 11（已完成）
 5. Phase 12（已完成）
+6. Phase 13（已完成）
+7. Phase 14（已完成）
 
 ## 当前阶段
-- `in_progress`: 扩展迭代待定
-- `next_commit`: `feat(phase-12): add rbac app-store and readonly files apis`
+- `in_progress`: Phase 15 规划中（真实 executor 服务接入与 E2E 增强）
+- `next_commit`: `feat(phase-14): wire control-plane and portal into docker compose`
