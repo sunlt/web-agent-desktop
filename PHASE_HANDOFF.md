@@ -5,7 +5,7 @@
 
 ### inputs
 - `设计.md`
-- 当前仓库已有内容（`docker-compose.yml`、`dockerfile`、`scripts/*`、`portal/*`）
+- 当前仓库已有内容（`docker-compose.yml`、`executor/Dockerfile`、`scripts/*`、`portal/*`）
 
 ### actions
 - 完整审阅设计文档（含 session lifecycle、manifest、provider 能力约束）。

@@ -36,7 +36,7 @@ services:
   executor:
     build:
       context: .
-      dockerfile: ./dockerfile
+      dockerfile: ./executor/Dockerfile
     image: executor:latest
     container_name: executor
     ports:
