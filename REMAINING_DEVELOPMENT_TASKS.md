@@ -293,6 +293,34 @@
 
 ---
 
+## Phase 18: 网关/BFF 与部署边界拆分（进行中）
+**Type**: Architecture + Deployment
+**Estimated**: 8~16 小时
+**目标**: 从“control-plane 直连承接”升级为“gateway 前置承接”，并推进 executor-manager/observability 的独立化边界。
+
+**范围文件**:
+- `gateway/*`
+- `docker-compose.yml`
+- `portal/nginx.conf`
+- `scripts/pre-commit-check.sh`
+- `TODO_PROVIDER_MIGRATION_AND_REMAINING_PLAN.md`
+
+**Tasks**:
+- [x] 新增独立 `gateway` 服务（TypeScript + Express），支持 `/api` 反向代理到 `control-plane`。
+- [x] `docker-compose` 接入 `gateway`，并调整 `portal -> gateway -> control-plane` 链路。
+- [x] pre-commit 检查纳入 `gateway` 的 lint/typecheck。
+- [ ] 拆分 `executor-manager` 与 `executor` 的部署与职责边界（从 control-plane 中抽离管理面）。
+- [ ] 引入独立 observability 组件（集中日志/指标采集与查询出口）。
+
+**Verification Criteria**:
+- [ ] `docker compose up -d gateway control-plane portal` 后，前端 `/api` 走 gateway 链路可用。
+- [ ] gateway 侧可输出基础访问日志与 upstream 错误日志。
+
+**Exit Criteria**:
+- 形成独立网关入口，且部署图中应用流量不再直接访问 control-plane。
+
+---
+
 ## 执行顺序
 1. Phase 8（已完成）
 2. Phase 9（已完成）
@@ -304,7 +332,8 @@
 8. Phase 15（已完成）
 9. Phase 16（已完成）
 10. Phase 17（进行中）
+11. Phase 18（进行中）
 
 ## 当前阶段
-- `in_progress`: Phase 17（前端 E2E 基线 + 工作台剩余能力补齐）
-- `next_commit`: `feat(phase-18): scaffold gateway and observability split`
+- `in_progress`: Phase 18（网关/BFF 与部署边界拆分）
+- `next_commit`: `feat(phase-18): split executor-manager boundary from control-plane`

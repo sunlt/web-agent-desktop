@@ -15,3 +15,4 @@ run_checks() {
 run_checks "control-plane"
 run_checks "portal"
 run_checks "executor"
+run_checks "gateway"
