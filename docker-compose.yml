@@ -143,6 +143,22 @@ services:
       - agent-network
     restart: always
 
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - control-plane
+      - gateway
+      - executor
+      - executor-manager
+    networks:
+      - agent-network
+    restart: always
+
   pgsql:
     container_name: pgsql
     image: docker.m.daocloud.io/library/postgres:16-alpine

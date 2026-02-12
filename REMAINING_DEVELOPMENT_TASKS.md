@@ -311,7 +311,8 @@
 - [x] pre-commit 检查纳入 `gateway` 的 lint/typecheck。
 - [x] 新增 `executor-manager` 独立服务并由 `gateway` 分流 `session-workers` 路由（delegated 模式）。
 - [ ] 将 `session-worker` 生命周期核心逻辑从 control-plane 完全迁移到 `executor-manager`（去除 delegated 依赖）。
-- [ ] 引入独立 observability 组件（集中日志/指标采集与查询出口）。
+- [x] 引入独立 observability 组件基础层：`prometheus`（compose）统一采集各服务健康与对账指标入口。
+- [ ] 补齐 observability 深化能力：告警规则、日志聚合与可视化看板（Grafana/Loki/Alertmanager）。
 
 **Verification Criteria**:
 - [ ] `docker compose up -d gateway control-plane portal` 后，前端 `/api` 走 gateway 链路可用。
@@ -337,4 +338,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 18（网关/BFF 与部署边界拆分）
-- `next_commit`: `feat(phase-18): migrate session lifecycle core to executor-manager`
+- `next_commit`: `feat(phase-18): add observability dashboards and alerting stack`

@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "control-plane-health"
+    metrics_path: /health
+    static_configs:
+      - targets: ["control-plane:3000"]
+
+  - job_name: "gateway-health"
+    metrics_path: /health
+    static_configs:
+      - targets: ["gateway:3001"]
+
+  - job_name: "executor-health"
+    metrics_path: /health
+    static_configs:
+      - targets: ["executor:8090"]
+
+  - job_name: "executor-manager-health"
+    metrics_path: /health
+    static_configs:
+      - targets: ["executor-manager:3010"]
+
+  - job_name: "control-plane-reconcile-metrics"
+    metrics_path: /api/reconcile/metrics
+    static_configs:
+      - targets: ["control-plane:3000"]

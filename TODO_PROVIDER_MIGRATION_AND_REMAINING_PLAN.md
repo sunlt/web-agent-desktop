@@ -146,7 +146,7 @@
 
 - [x] 已新增独立 `gateway` 服务（`gateway:3001`）承接 `/api`，`portal` 不再直连 `control-plane`。
 - [ ] `executor-manager` 已独立部署并承接 `session-workers` 路由（delegated），但生命周期核心逻辑仍待从 control-plane 完全迁移。
-- [ ] docker 编排已补齐 `portal + gateway + control-plane + postgres + rustfs + executor`，但 observability 仍未独立完成。
+- [ ] docker 编排已补齐 `portal + gateway + executor-manager + control-plane + postgres + rustfs + executor + prometheus`，但日志聚合/告警看板仍未独立完成。
 - [ ] 前端流式稳定性（断线重连/游标恢复）与高级工作台交互仍与设计目标存在差距。
 
 ---
