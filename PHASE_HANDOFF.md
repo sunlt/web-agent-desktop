@@ -1173,3 +1173,88 @@
 
 ### next_phase
 - Phase 17 后续子阶段：human-loop resolved 历史回看 + 流式断线重连与 cursor 恢复。
+
+---
+
+## Phase 17: 执行器工作目录文件管理 + TTY 接入
+
+### objective
+- 在 ChatUI 内补齐设计文档要求的执行器侧辅助面板：
+  - 执行器工作目录文件管理（`/workspace`）
+  - TTY 命令执行面板
+- 保留并并行支持全局文件管理面板（RBAC `files` 路由）。
+
+### inputs
+- 既有全局文件接口：`/api/files/*`。
+- gateway 已支持 `/api/session-workers/* -> executor-manager` 分流。
+- executor-manager 已持有 `sessionId -> containerId` 生命周期映射。
+
+### actions
+- 后端（executor）新增工作目录与命令执行接口：
+  - `GET /workspace/tree`
+  - `GET /workspace/file`
+  - `PUT /workspace/file`
+  - `POST /workspace/upload`
+  - `POST /workspace/rename`
+  - `DELETE /workspace/file`
+  - `POST /workspace/mkdir`
+  - `GET /workspace/download`
+  - `POST /tty/exec`
+- 后端（executor-manager）新增按 `sessionId` 的代理路由：
+  - `GET /api/session-workers/:sessionId/workspace/tree`
+  - `GET /api/session-workers/:sessionId/workspace/file`
+  - `PUT /api/session-workers/:sessionId/workspace/file`
+  - `POST /api/session-workers/:sessionId/workspace/upload`
+  - `POST /api/session-workers/:sessionId/workspace/rename`
+  - `DELETE /api/session-workers/:sessionId/workspace/file`
+  - `POST /api/session-workers/:sessionId/workspace/mkdir`
+  - `GET /api/session-workers/:sessionId/workspace/download`
+  - `POST /api/session-workers/:sessionId/tty/exec`
+- 前端（portal）重构文件面板：
+  - 将原单一 Files/Preview 面板改为两个独立面板：
+    - 执行器工作目录文件面板（基于 `sessionId`）
+    - 全局文件管理面板（基于 `userId`）
+  - 两个面板均支持：树浏览、预览、编辑、上传、重命名、删除、下载。
+- 前端新增 TTY 面板：支持 `command/cwd/timeout` 输入、执行历史、`stdout/stderr/exitCode` 展示。
+- Playwright 用例补齐：新增“执行器工作目录 + TTY”联动用例，并同步更新 Files/Preview 断言定位。
+
+### outputs
+- `executor/src/server.ts`
+- `executor/src/workspace-files.ts`
+- `executor/src/workspace-terminal.ts`
+- `executor-manager/src/ports/executor-client.ts`
+- `executor-manager/src/adapters/executor-http-client.ts`
+- `executor-manager/src/adapters/noop-executor-client.ts`
+- `executor-manager/src/services/lifecycle-manager.ts`
+- `executor-manager/src/routes/session-workers.ts`
+- `portal/src/App.tsx`
+- `portal/src/styles.css`
+- `portal/src/workbench/use-file-workspace.ts`
+- `portal/src/workbench/use-session-terminal.ts`
+- `portal/src/workbench/file-workspace-panel.tsx`
+- `portal/src/workbench/session-terminal-panel.tsx`
+- `portal/e2e/tests/chat-workbench.spec.ts`
+- `portal/e2e/tests/support/mock-portal-api.ts`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `cd executor && npm run lint && npm run typecheck`
+  - `cd executor-manager && npm run lint && npm run typecheck`
+  - `cd portal && npm run lint && npm run typecheck`
+  - `cd portal && npm run test:e2e`
+- results:
+  - executor lint/typecheck 通过。
+  - executor-manager lint/typecheck 通过。
+  - portal lint/typecheck 通过。
+  - Playwright 8/8 通过（新增执行器工作目录 + TTY 用例）。
+
+### gate_result
+- **Pass**（ChatUI 已具备 Todo + TTY + 双文件管理 + 预览编辑上传能力，tmux 面板路径持续废弃）
+
+### risks
+- 当前 TTY 为命令执行型（request/response），非全交互流式终端；如需真正 pty 流式交互需额外引入 websocket/pty 网关。
+- 执行器工作目录面板依赖有效 `sessionId` 与已存在 worker；未激活会话时会提示而不自动创建。
+
+### next_phase
+- Phase 18/19：真实环境（compose + external executor）完整对话闭环 E2E 稳定化与回归收敛。

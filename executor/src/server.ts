@@ -7,6 +7,11 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import {
+  WorkspaceFileBrowser,
+  WorkspaceFileError,
+} from "./workspace-files.js";
+import { execWorkspaceCommand } from "./workspace-terminal.js";
 
 type TodoStatus = "todo" | "doing" | "done" | "canceled";
 
@@ -158,6 +163,208 @@ app.post("/workspace/validate", withAuth, async (req, res) => {
   }
 });
 
+app.get("/workspace/tree", withAuth, async (req, res) => {
+  try {
+    const containerId = requireString(req.query.containerId, "containerId");
+    const path = optionalString(req.query.path) ?? "/workspace";
+    const root = await ensureWorkspaceRoot(containerId);
+    const browser = new WorkspaceFileBrowser(root);
+    const tree = await browser.listTree(path);
+
+    recordEvent(req, "/workspace/tree");
+    res.json(tree);
+  } catch (error) {
+    handleWorkspaceError(res, error);
+  }
+});
+
+app.get("/workspace/file", withAuth, async (req, res) => {
+  try {
+    const containerId = requireString(req.query.containerId, "containerId");
+    const path = requireString(req.query.path, "path");
+    const offset = optionalInteger(req.query.offset);
+    const limit = optionalInteger(req.query.limit);
+
+    const root = await ensureWorkspaceRoot(containerId);
+    const browser = new WorkspaceFileBrowser(root);
+    const file = await browser.readFile(path, {
+      ...(typeof offset === "number" ? { offset } : {}),
+      ...(typeof limit === "number" ? { limit } : {}),
+    });
+
+    recordEvent(req, "/workspace/file:read");
+    res.json(file);
+  } catch (error) {
+    handleWorkspaceError(res, error);
+  }
+});
+
+app.put("/workspace/file", withAuth, async (req, res) => {
+  try {
+    const body = req.body as {
+      containerId?: string;
+      path?: string;
+      content?: string;
+      encoding?: "utf8" | "base64";
+    };
+
+    const containerId = requireString(body.containerId, "containerId");
+    const path = requireString(body.path, "path");
+    const content = requireString(body.content, "content");
+
+    const root = await ensureWorkspaceRoot(containerId);
+    const browser = new WorkspaceFileBrowser(root);
+    const result = await browser.writeFile({
+      path,
+      content,
+      encoding: body.encoding,
+    });
+
+    recordEvent(req, "/workspace/file:write");
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    handleWorkspaceError(res, error);
+  }
+});
+
+app.post("/workspace/upload", withAuth, async (req, res) => {
+  try {
+    const body = req.body as {
+      containerId?: string;
+      path?: string;
+      contentBase64?: string;
+    };
+
+    const containerId = requireString(body.containerId, "containerId");
+    const path = requireString(body.path, "path");
+    const contentBase64 = requireString(body.contentBase64, "contentBase64");
+
+    const root = await ensureWorkspaceRoot(containerId);
+    const browser = new WorkspaceFileBrowser(root);
+    const result = await browser.writeFile({
+      path,
+      content: contentBase64,
+      encoding: "base64",
+    });
+
+    recordEvent(req, "/workspace/upload");
+    res.status(201).json({ ok: true, ...result });
+  } catch (error) {
+    handleWorkspaceError(res, error);
+  }
+});
+
+app.post("/workspace/rename", withAuth, async (req, res) => {
+  try {
+    const body = req.body as {
+      containerId?: string;
+      path?: string;
+      newPath?: string;
+    };
+
+    const containerId = requireString(body.containerId, "containerId");
+    const path = requireString(body.path, "path");
+    const newPath = requireString(body.newPath, "newPath");
+
+    const root = await ensureWorkspaceRoot(containerId);
+    const browser = new WorkspaceFileBrowser(root);
+    const result = await browser.rename(path, newPath);
+
+    recordEvent(req, "/workspace/rename");
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    handleWorkspaceError(res, error);
+  }
+});
+
+app.delete("/workspace/file", withAuth, async (req, res) => {
+  try {
+    const containerId = requireString(req.query.containerId, "containerId");
+    const path = requireString(req.query.path, "path");
+
+    const root = await ensureWorkspaceRoot(containerId);
+    const browser = new WorkspaceFileBrowser(root);
+    const result = await browser.deletePath(path);
+
+    recordEvent(req, "/workspace/file:delete");
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    handleWorkspaceError(res, error);
+  }
+});
+
+app.post("/workspace/mkdir", withAuth, async (req, res) => {
+  try {
+    const body = req.body as {
+      containerId?: string;
+      path?: string;
+    };
+
+    const containerId = requireString(body.containerId, "containerId");
+    const path = requireString(body.path, "path");
+
+    const root = await ensureWorkspaceRoot(containerId);
+    const browser = new WorkspaceFileBrowser(root);
+    const result = await browser.mkdir(path);
+
+    recordEvent(req, "/workspace/mkdir");
+    res.status(201).json({ ok: true, ...result });
+  } catch (error) {
+    handleWorkspaceError(res, error);
+  }
+});
+
+app.get("/workspace/download", withAuth, async (req, res) => {
+  try {
+    const containerId = requireString(req.query.containerId, "containerId");
+    const path = requireString(req.query.path, "path");
+    const inline = parseBoolean(optionalString(req.query.inline), false);
+
+    const root = await ensureWorkspaceRoot(containerId);
+    const browser = new WorkspaceFileBrowser(root);
+    const file = await browser.download(path);
+
+    recordEvent(req, "/workspace/download");
+    res.setHeader("content-type", file.contentType);
+    res.setHeader(
+      "content-disposition",
+      `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(file.fileName)}"`,
+    );
+    res.status(200).send(file.content);
+  } catch (error) {
+    handleWorkspaceError(res, error);
+  }
+});
+
+app.post("/tty/exec", withAuth, async (req, res) => {
+  try {
+    const body = req.body as {
+      containerId?: string;
+      command?: string;
+      cwd?: string;
+      timeoutMs?: number;
+      maxOutputBytes?: number;
+    };
+
+    const containerId = requireString(body.containerId, "containerId");
+    const command = requireString(body.command, "command");
+    const root = await ensureWorkspaceRoot(containerId);
+
+    const result = await execWorkspaceCommand({
+      root,
+      command,
+      cwd: body.cwd,
+      timeoutMs: body.timeoutMs,
+      maxOutputBytes: body.maxOutputBytes,
+    });
+
+    recordEvent(req, "/tty/exec");
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    handleWorkspaceError(res, error);
+  }
+});
+
 app.post("/workspace/sync", withAuth, async (req, res) => {
   try {
     const body = req.body as {
@@ -247,6 +454,24 @@ function requireString(value: unknown, field: string): string {
   return value;
 }
 
+function optionalString(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+  return undefined;
+}
+
+function optionalInteger(value: unknown): number | undefined {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("invalid integer value");
+  }
+  return Math.max(0, Math.floor(parsed));
+}
+
 async function ensureWorkspaceRoot(containerId: string): Promise<string> {
   const root = join(workspaceRoot, containerId, "workspace");
   await mkdir(root, { recursive: true });
@@ -304,6 +529,41 @@ function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
     return false;
   }
   return fallback;
+}
+
+function handleWorkspaceError(res: Response, error: unknown): void {
+  if (error instanceof WorkspaceFileError) {
+    switch (error.code) {
+      case "invalid_path":
+      case "not_directory":
+        res.status(400).json({
+          error: error.message,
+          code: error.code,
+        });
+        return;
+      case "not_found":
+        res.status(404).json({
+          error: error.message,
+          code: error.code,
+        });
+        return;
+      case "already_exists":
+      case "is_directory":
+        res.status(409).json({
+          error: error.message,
+          code: error.code,
+        });
+        return;
+      default:
+        res.status(500).json({
+          error: error.message,
+          code: error.code,
+        });
+        return;
+    }
+  }
+
+  handleError(res, error);
 }
 
 function handleError(res: Response, error: unknown): void {

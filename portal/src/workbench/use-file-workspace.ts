@@ -1,4 +1,4 @@
-import { type ChangeEvent, useCallback, useMemo, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   formatBytes,
   joinUiPath,
@@ -37,6 +37,16 @@ export interface FileReadResult {
   readonly content: string;
 }
 
+export type FileWorkspaceScope =
+  | {
+      readonly kind: "global";
+      readonly userId: string;
+    }
+  | {
+      readonly kind: "executor-workspace";
+      readonly sessionId: string;
+    };
+
 type FileListStatus = "idle" | "loading" | "error";
 
 export interface FileWorkspaceController {
@@ -53,6 +63,7 @@ export interface FileWorkspaceController {
   readonly setFileDraft: (value: string) => void;
   readonly activeFileDownloadUrl: string | null;
   readonly activeFileInlineUrl: string | null;
+  readonly ready: boolean;
   readonly loadFileTree: (path?: string) => Promise<void>;
   readonly openFile: (path: string, offset?: number) => Promise<void>;
   readonly handleLoadMoreFile: () => Promise<void>;
@@ -67,15 +78,53 @@ export interface FileWorkspaceController {
   readonly parentPath: string;
 }
 
+interface FileApiAdapter {
+  readonly ready: boolean;
+  readonly missingHint: string;
+  readonly tree: (path: string) => string;
+  readonly read: (path: string, offset?: number, limit?: number) => string;
+  readonly writeUrl: string;
+  readonly writeBody: (input: {
+    path: string;
+    content: string;
+    encoding: "utf8" | "base64";
+  }) => Record<string, unknown>;
+  readonly uploadUrl: string;
+  readonly uploadBody: (input: {
+    path: string;
+    contentBase64: string;
+  }) => Record<string, unknown>;
+  readonly renameUrl: string;
+  readonly renameBody: (input: {
+    path: string;
+    newPath: string;
+  }) => Record<string, unknown>;
+  readonly remove: (path: string) => string;
+  readonly mkdirUrl: string;
+  readonly mkdirBody: (input: { path: string }) => Record<string, unknown>;
+  readonly downloadUrl: (path: string, inline: boolean) => string;
+}
+
 export function useFileWorkspace(input: {
   readonly apiBase: string;
-  readonly fileUserId: string;
+  readonly scope: FileWorkspaceScope;
   readonly fetchJson: <T>(path: string, init?: RequestInit) => Promise<T>;
   readonly appendTimeline: (label: string, ts?: string) => void;
+  readonly initialPath?: string;
 }): FileWorkspaceController {
-  const { apiBase, fileUserId, fetchJson, appendTimeline } = input;
+  const { apiBase, scope, fetchJson, appendTimeline, initialPath } = input;
 
-  const [fileTreePath, setFileTreePath] = useState<string>("/workspace/public");
+  const adapter = useMemo(
+    () => createFileApiAdapter(apiBase, scope),
+    [apiBase, scope],
+  );
+
+  const [fileTreePath, setFileTreePath] = useState<string>(() => {
+    if (initialPath) {
+      return normalizeUiPath(initialPath);
+    }
+    return scope.kind === "global" ? "/workspace/public" : "/workspace";
+  });
   const [fileEntries, setFileEntries] = useState<FileTreeEntry[]>([]);
   const [fileListStatus, setFileListStatus] = useState<FileListStatus>("idle");
   const [fileError, setFileError] = useState<string>("");
@@ -85,29 +134,50 @@ export function useFileWorkspace(input: {
   const [filePreviewMode, setFilePreviewMode] = useState<FilePreviewMode>("none");
   const [fileDraft, setFileDraft] = useState<string>("");
 
+  const scopeKey = useMemo(() => {
+    if (scope.kind === "global") {
+      return `global:${scope.userId.trim()}`;
+    }
+    return `workspace:${scope.sessionId.trim()}`;
+  }, [scope]);
+
+  useEffect(() => {
+    setFileEntries([]);
+    setFileListStatus("idle");
+    setFileError("");
+    setFileBusy(false);
+    setActiveFilePath(null);
+    setActiveFilePreview(null);
+    setFilePreviewMode("none");
+    setFileDraft("");
+  }, [scopeKey]);
+
   const activeFileDownloadUrl = useMemo(() => {
-    if (!activeFilePath) {
+    if (!activeFilePath || !adapter.ready) {
       return null;
     }
-    return `${apiBase}/files/download?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(activeFilePath)}`;
-  }, [activeFilePath, apiBase, fileUserId]);
+    return adapter.downloadUrl(activeFilePath, false);
+  }, [activeFilePath, adapter]);
 
   const activeFileInlineUrl = useMemo(() => {
-    if (!activeFilePath) {
+    if (!activeFilePath || !adapter.ready) {
       return null;
     }
-    return `${apiBase}/files/download?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(activeFilePath)}&inline=1`;
-  }, [activeFilePath, apiBase, fileUserId]);
+    return adapter.downloadUrl(activeFilePath, true);
+  }, [activeFilePath, adapter]);
 
   const loadFileTree = useCallback(
     async (path?: string) => {
+      if (!adapter.ready) {
+        setFileListStatus("error");
+        setFileError(adapter.missingHint);
+        return;
+      }
       const targetPath = normalizeUiPath(path ?? fileTreePath);
       setFileListStatus("loading");
       setFileError("");
       try {
-        const tree = await fetchJson<FileTreeResult>(
-          `/files/tree?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(targetPath)}`,
-        );
+        const tree = await fetchJson<FileTreeResult>(adapter.tree(targetPath));
         setFileTreePath(tree.path);
         setFileEntries(tree.entries ?? []);
         setFileListStatus("idle");
@@ -117,17 +187,22 @@ export function useFileWorkspace(input: {
         setFileError(message);
       }
     },
-    [fetchJson, fileTreePath, fileUserId],
+    [adapter, fetchJson, fileTreePath],
   );
 
   const openFile = useCallback(
     async (path: string, offset?: number) => {
+      if (!adapter.ready) {
+        setFileError(adapter.missingHint);
+        return;
+      }
+
       const normalizedPath = normalizeUiPath(path);
       setFileBusy(true);
       setFileError("");
       try {
         const read = await fetchJson<FileReadResult>(
-          `/files/file?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(normalizedPath)}&limit=${FILE_READ_LIMIT}${offset ? `&offset=${offset}` : ""}`,
+          adapter.read(normalizedPath, offset, FILE_READ_LIMIT),
         );
         const mode = resolveFilePreviewMode(read.path, read.contentType, read.encoding);
 
@@ -161,7 +236,7 @@ export function useFileWorkspace(input: {
         setFileBusy(false);
       }
     },
-    [activeFilePreview, fetchJson, fileUserId],
+    [activeFilePreview, adapter, fetchJson],
   );
 
   const handleLoadMoreFile = useCallback(async () => {
@@ -179,20 +254,26 @@ export function useFileWorkspace(input: {
     if (!activeFilePath || filePreviewMode !== "text") {
       return;
     }
+    if (!adapter.ready) {
+      setFileError(adapter.missingHint);
+      return;
+    }
+
     setFileBusy(true);
     setFileError("");
     try {
-      await fetchJson<{ ok: boolean }>(`/files/file`, {
+      await fetchJson<{ ok: boolean }>(adapter.writeUrl, {
         method: "PUT",
         headers: {
           "content-type": "application/json",
         },
-        body: JSON.stringify({
-          userId: fileUserId,
-          path: activeFilePath,
-          content: fileDraft,
-          encoding: "utf8",
-        }),
+        body: JSON.stringify(
+          adapter.writeBody({
+            path: activeFilePath,
+            content: fileDraft,
+            encoding: "utf8",
+          }),
+        ),
       });
       appendTimeline(`file.write: ${activeFilePath}`);
       await Promise.all([openFile(activeFilePath), loadFileTree(fileTreePath)]);
@@ -204,12 +285,12 @@ export function useFileWorkspace(input: {
     }
   }, [
     activeFilePath,
+    adapter,
     appendTimeline,
     fetchJson,
     fileDraft,
     filePreviewMode,
     fileTreePath,
-    fileUserId,
     loadFileTree,
     openFile,
   ]);
@@ -219,18 +300,24 @@ export function useFileWorkspace(input: {
     if (!nextPath) {
       return;
     }
+    if (!adapter.ready) {
+      setFileError(adapter.missingHint);
+      return;
+    }
+
     setFileBusy(true);
     setFileError("");
     try {
-      await fetchJson<{ ok: boolean; path: string }>(`/files/mkdir`, {
+      await fetchJson<{ ok: boolean; path: string }>(adapter.mkdirUrl, {
         method: "POST",
         headers: {
           "content-type": "application/json",
         },
-        body: JSON.stringify({
-          userId: fileUserId,
-          path: nextPath,
-        }),
+        body: JSON.stringify(
+          adapter.mkdirBody({
+            path: nextPath,
+          }),
+        ),
       });
       appendTimeline(`file.mkdir: ${nextPath}`);
       await loadFileTree(fileTreePath);
@@ -240,27 +327,33 @@ export function useFileWorkspace(input: {
     } finally {
       setFileBusy(false);
     }
-  }, [appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree]);
+  }, [adapter, appendTimeline, fetchJson, fileTreePath, loadFileTree]);
 
   const createTextFile = useCallback(async () => {
     const nextPath = window.prompt("新文件路径", joinUiPath(fileTreePath, "untitled.txt"));
     if (!nextPath) {
       return;
     }
+    if (!adapter.ready) {
+      setFileError(adapter.missingHint);
+      return;
+    }
+
     setFileBusy(true);
     setFileError("");
     try {
-      await fetchJson<{ ok: boolean; path: string }>(`/files/file`, {
+      await fetchJson<{ ok: boolean; path: string }>(adapter.writeUrl, {
         method: "PUT",
         headers: {
           "content-type": "application/json",
         },
-        body: JSON.stringify({
-          userId: fileUserId,
-          path: nextPath,
-          content: "",
-          encoding: "utf8",
-        }),
+        body: JSON.stringify(
+          adapter.writeBody({
+            path: nextPath,
+            content: "",
+            encoding: "utf8",
+          }),
+        ),
       });
       appendTimeline(`file.create: ${nextPath}`);
       await loadFileTree(fileTreePath);
@@ -271,7 +364,7 @@ export function useFileWorkspace(input: {
     } finally {
       setFileBusy(false);
     }
-  }, [appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree, openFile]);
+  }, [adapter, appendTimeline, fetchJson, fileTreePath, loadFileTree, openFile]);
 
   const renamePath = useCallback(
     async (path: string) => {
@@ -279,21 +372,27 @@ export function useFileWorkspace(input: {
       if (!nextPath || nextPath === path) {
         return;
       }
+      if (!adapter.ready) {
+        setFileError(adapter.missingHint);
+        return;
+      }
+
       setFileBusy(true);
       setFileError("");
       try {
         await fetchJson<{ ok: boolean; path: string; newPath: string }>(
-          `/files/rename`,
+          adapter.renameUrl,
           {
             method: "POST",
             headers: {
               "content-type": "application/json",
             },
-            body: JSON.stringify({
-              userId: fileUserId,
-              path,
-              newPath: nextPath,
-            }),
+            body: JSON.stringify(
+              adapter.renameBody({
+                path,
+                newPath: nextPath,
+              }),
+            ),
           },
         );
         appendTimeline(`file.rename: ${path} -> ${nextPath}`);
@@ -308,7 +407,7 @@ export function useFileWorkspace(input: {
         setFileBusy(false);
       }
     },
-    [activeFilePath, appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree, openFile],
+    [activeFilePath, adapter, appendTimeline, fetchJson, fileTreePath, loadFileTree, openFile],
   );
 
   const deletePath = useCallback(
@@ -316,15 +415,17 @@ export function useFileWorkspace(input: {
       if (!window.confirm(`确认删除 ${path} 吗？`)) {
         return;
       }
+      if (!adapter.ready) {
+        setFileError(adapter.missingHint);
+        return;
+      }
+
       setFileBusy(true);
       setFileError("");
       try {
-        await fetchJson<{ ok: boolean; path: string }>(
-          `/files/file?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(path)}`,
-          {
-            method: "DELETE",
-          },
-        );
+        await fetchJson<{ ok: boolean; path: string }>(adapter.remove(path), {
+          method: "DELETE",
+        });
         appendTimeline(`file.delete: ${path}`);
         if (activeFilePath === path) {
           setActiveFilePath(null);
@@ -340,7 +441,7 @@ export function useFileWorkspace(input: {
         setFileBusy(false);
       }
     },
-    [activeFilePath, appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree],
+    [activeFilePath, adapter, appendTimeline, fetchJson, fileTreePath, loadFileTree],
   );
 
   const uploadFile = useCallback(
@@ -348,6 +449,10 @@ export function useFileWorkspace(input: {
       const file = event.target.files?.[0];
       event.target.value = "";
       if (!file) {
+        return;
+      }
+      if (!adapter.ready) {
+        setFileError(adapter.missingHint);
         return;
       }
 
@@ -360,16 +465,17 @@ export function useFileWorkspace(input: {
       setFileError("");
       try {
         const fileBuffer = new Uint8Array(await file.arrayBuffer());
-        await fetchJson<{ ok: boolean; path: string }>(`/files/upload`, {
+        await fetchJson<{ ok: boolean; path: string }>(adapter.uploadUrl, {
           method: "POST",
           headers: {
             "content-type": "application/json",
           },
-          body: JSON.stringify({
-            userId: fileUserId,
-            path: targetPath,
-            contentBase64: uint8ArrayToBase64(fileBuffer),
-          }),
+          body: JSON.stringify(
+            adapter.uploadBody({
+              path: targetPath,
+              contentBase64: uint8ArrayToBase64(fileBuffer),
+            }),
+          ),
         });
         appendTimeline(`file.upload: ${targetPath}`);
         await loadFileTree(fileTreePath);
@@ -380,18 +486,22 @@ export function useFileWorkspace(input: {
         setFileBusy(false);
       }
     },
-    [appendTimeline, fetchJson, fileTreePath, fileUserId, loadFileTree],
+    [adapter, appendTimeline, fetchJson, fileTreePath, loadFileTree],
   );
 
   const downloadPath = useCallback(
     (path: string) => {
-      const url = `${apiBase}/files/download?userId=${encodeURIComponent(fileUserId)}&path=${encodeURIComponent(path)}`;
+      if (!adapter.ready) {
+        setFileError(adapter.missingHint);
+        return;
+      }
+      const url = adapter.downloadUrl(path, false);
       const popup = window.open(url, "_blank", "noopener");
       if (!popup) {
         window.location.href = url;
       }
     },
-    [apiBase, fileUserId],
+    [adapter],
   );
 
   return {
@@ -408,6 +518,7 @@ export function useFileWorkspace(input: {
     setFileDraft,
     activeFileDownloadUrl,
     activeFileInlineUrl,
+    ready: adapter.ready,
     loadFileTree,
     openFile,
     handleLoadMoreFile,
@@ -420,5 +531,84 @@ export function useFileWorkspace(input: {
     downloadPath,
     formatFileSize: formatBytes,
     parentPath: parentUiPath(fileTreePath),
+  };
+}
+
+function createFileApiAdapter(apiBase: string, scope: FileWorkspaceScope): FileApiAdapter {
+  if (scope.kind === "global") {
+    const userId = scope.userId.trim();
+    const ready = userId.length > 0;
+
+    return {
+      ready,
+      missingHint: "请先输入 userId",
+      tree: (path) =>
+        `/files/tree?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(path)}`,
+      read: (path, offset, limit) =>
+        `/files/file?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(path)}${typeof limit === "number" ? `&limit=${limit}` : ""}${typeof offset === "number" ? `&offset=${offset}` : ""}`,
+      writeUrl: "/files/file",
+      writeBody: (input) => ({
+        userId,
+        path: input.path,
+        content: input.content,
+        encoding: input.encoding,
+      }),
+      uploadUrl: "/files/upload",
+      uploadBody: (input) => ({
+        userId,
+        path: input.path,
+        contentBase64: input.contentBase64,
+      }),
+      renameUrl: "/files/rename",
+      renameBody: (input) => ({
+        userId,
+        path: input.path,
+        newPath: input.newPath,
+      }),
+      remove: (path) =>
+        `/files/file?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(path)}`,
+      mkdirUrl: "/files/mkdir",
+      mkdirBody: (input) => ({
+        userId,
+        path: input.path,
+      }),
+      downloadUrl: (path, inline) =>
+        `${apiBase}/files/download?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(path)}${inline ? "&inline=1" : ""}`,
+    };
+  }
+
+  const sessionId = scope.sessionId.trim();
+  const ready = sessionId.length > 0;
+  const base = `/session-workers/${encodeURIComponent(sessionId)}/workspace`;
+
+  return {
+    ready,
+    missingHint: "请先输入 sessionId",
+    tree: (path) => `${base}/tree?path=${encodeURIComponent(path)}`,
+    read: (path, offset, limit) =>
+      `${base}/file?path=${encodeURIComponent(path)}${typeof limit === "number" ? `&limit=${limit}` : ""}${typeof offset === "number" ? `&offset=${offset}` : ""}`,
+    writeUrl: `${base}/file`,
+    writeBody: (input) => ({
+      path: input.path,
+      content: input.content,
+      encoding: input.encoding,
+    }),
+    uploadUrl: `${base}/upload`,
+    uploadBody: (input) => ({
+      path: input.path,
+      contentBase64: input.contentBase64,
+    }),
+    renameUrl: `${base}/rename`,
+    renameBody: (input) => ({
+      path: input.path,
+      newPath: input.newPath,
+    }),
+    remove: (path) => `${base}/file?path=${encodeURIComponent(path)}`,
+    mkdirUrl: `${base}/mkdir`,
+    mkdirBody: (input) => ({
+      path: input.path,
+    }),
+    downloadUrl: (path, inline) =>
+      `${apiBase}${base}/download?path=${encodeURIComponent(path)}${inline ? "&inline=1" : ""}`,
   };
 }

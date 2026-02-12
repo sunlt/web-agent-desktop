@@ -1,8 +1,10 @@
 import type { ProviderKind } from "./workbench/transport";
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { TextFilePreview } from "./workbench/text-file-preview";
+import { FileWorkspacePanel } from "./workbench/file-workspace-panel";
+import { SessionTerminalPanel } from "./workbench/session-terminal-panel";
 import { useFileWorkspace } from "./workbench/use-file-workspace";
 import { useRunChat } from "./workbench/use-run-chat";
+import { useSessionTerminal } from "./workbench/use-session-terminal";
 import {
   extractMessageText,
   formatTime,
@@ -35,7 +37,8 @@ export default function App() {
   const [model, setModel] = useState<string>(DEFAULT_MODEL["codex-cli"]);
   const [requireHumanLoop, setRequireHumanLoop] = useState<boolean>(true);
 
-  const [fileUserId, setFileUserId] = useState<string>("u-alice");
+  const [globalFileUserId, setGlobalFileUserId] = useState<string>("u-alice");
+  const [workspaceSessionId, setWorkspaceSessionId] = useState<string>("");
   const [storeApps, setStoreApps] = useState<StoreAppItem[]>([]);
   const [storeStatus, setStoreStatus] = useState<StoreStatus>("idle");
   const [storeError, setStoreError] = useState<string>("");
@@ -58,15 +61,42 @@ export default function App() {
     activeStoreApp,
   });
 
-  const fileWorkspace = useFileWorkspace({
+  useEffect(() => {
+    if (!workspaceSessionId.trim() && runChat.activeChatId) {
+      setWorkspaceSessionId(runChat.activeChatId);
+    }
+  }, [runChat.activeChatId, workspaceSessionId]);
+
+  const executorWorkspace = useFileWorkspace({
     apiBase: API_BASE,
-    fileUserId,
+    scope: {
+      kind: "executor-workspace",
+      sessionId: workspaceSessionId,
+    },
+    initialPath: "/workspace",
+    fetchJson: runChat.fetchJson,
+    appendTimeline: runChat.appendTimeline,
+  });
+
+  const globalFileWorkspace = useFileWorkspace({
+    apiBase: API_BASE,
+    scope: {
+      kind: "global",
+      userId: globalFileUserId,
+    },
+    initialPath: "/workspace/public",
+    fetchJson: runChat.fetchJson,
+    appendTimeline: runChat.appendTimeline,
+  });
+
+  const sessionTerminal = useSessionTerminal({
+    sessionId: workspaceSessionId,
     fetchJson: runChat.fetchJson,
     appendTimeline: runChat.appendTimeline,
   });
 
   const refreshStoreApps = useCallback(async () => {
-    const userId = fileUserId.trim();
+    const userId = globalFileUserId.trim();
     if (!userId) {
       setStoreApps([]);
       setStoreStatus("idle");
@@ -98,7 +128,7 @@ export default function App() {
       setStoreStatus("error");
       setStoreError(message);
     }
-  }, [fileUserId, runChat]);
+  }, [globalFileUserId, runChat]);
 
   useEffect(() => {
     void refreshStoreApps();
@@ -127,7 +157,7 @@ export default function App() {
       <header className="app-header">
         <div>
           <p className="eyebrow">Agent Workbench</p>
-          <h1>ChatUI · Todo · Human Loop · Files · Store</h1>
+          <h1>ChatUI · Todo · Human Loop · TTY · Files · Store</h1>
         </div>
         <div className="run-chip" data-status={runChat.runStatus}>
           <span className="run-dot" />
@@ -303,7 +333,7 @@ export default function App() {
               <button
                 type="button"
                 className="secondary"
-                disabled={storeStatus === "loading" || !fileUserId.trim()}
+                disabled={storeStatus === "loading" || !globalFileUserId.trim()}
                 onClick={() => void refreshStoreApps()}
               >
                 {storeStatus === "loading" ? "刷新中..." : "刷新应用"}
@@ -459,188 +489,31 @@ export default function App() {
             </div>
           </section>
 
-          <section className="panel">
-            <h3>Files</h3>
-            <div className="files-controls">
-              <label>
-                userId
-                <input
-                  value={fileUserId}
-                  onChange={(event) => setFileUserId(event.target.value)}
-                  placeholder="u-alice"
-                />
-              </label>
-              <div className="files-path-row">
-                <input
-                  value={fileWorkspace.fileTreePath}
-                  onChange={(event) => fileWorkspace.setFileTreePath(event.target.value)}
-                  placeholder="/workspace/public"
-                />
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={fileWorkspace.fileBusy || !fileUserId.trim()}
-                  onClick={() => void fileWorkspace.loadFileTree(fileWorkspace.fileTreePath)}
-                >
-                  刷新
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={fileWorkspace.fileBusy || fileWorkspace.fileTreePath === "/"}
-                  onClick={() => void fileWorkspace.loadFileTree(fileWorkspace.parentPath)}
-                >
-                  上级
-                </button>
-              </div>
-              <div className="files-action-row">
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={fileWorkspace.fileBusy || !fileUserId.trim()}
-                  onClick={() => void fileWorkspace.createDirectory()}
-                >
-                  新建目录
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={fileWorkspace.fileBusy || !fileUserId.trim()}
-                  onClick={() => void fileWorkspace.createTextFile()}
-                >
-                  新建文件
-                </button>
-                <label className="upload-label">
-                  上传
-                  <input
-                    type="file"
-                    onChange={(event) => void fileWorkspace.uploadFile(event)}
-                  />
-                </label>
-              </div>
-            </div>
-            {fileWorkspace.fileListStatus === "loading" ? (
-              <p className="muted">文件列表加载中...</p>
-            ) : null}
-            {fileWorkspace.fileError ? <p className="error-text">{fileWorkspace.fileError}</p> : null}
-            <div className="file-list">
-              {fileWorkspace.fileEntries.length === 0 ? (
-                <p className="muted">点击刷新加载文件列表</p>
-              ) : (
-                fileWorkspace.fileEntries.map((entry) => (
-                  <article
-                    key={entry.path}
-                    className={`file-row ${fileWorkspace.activeFilePath === entry.path ? "active" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      className="file-entry"
-                      onClick={() =>
-                        entry.isDirectory
-                          ? void fileWorkspace.loadFileTree(entry.path)
-                          : void fileWorkspace.openFile(entry.path)
-                      }
-                    >
-                      <span>{entry.isDirectory ? `📁 ${entry.name}` : entry.name}</span>
-                      <span>
-                        {entry.isDirectory ? "dir" : fileWorkspace.formatFileSize(entry.size)}
-                      </span>
-                    </button>
-                    <div className="file-row-actions">
-                      {!entry.isDirectory ? (
-                        <button
-                          type="button"
-                          className="secondary"
-                          disabled={fileWorkspace.fileBusy}
-                          onClick={() => fileWorkspace.downloadPath(entry.path)}
-                        >
-                          下载
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={fileWorkspace.fileBusy}
-                        onClick={() => void fileWorkspace.renamePath(entry.path)}
-                      >
-                        重命名
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={fileWorkspace.fileBusy}
-                        onClick={() => void fileWorkspace.deletePath(entry.path)}
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </article>
-                ))
-              )}
-            </div>
-          </section>
+          <FileWorkspacePanel
+            title="执行器工作目录文件"
+            workspace={executorWorkspace}
+            identity={{
+              label: "sessionId",
+              value: workspaceSessionId,
+              onChange: setWorkspaceSessionId,
+              placeholder: runChat.activeChatId ?? "chat/session id",
+            }}
+            hint="基于 executor-manager 会话 worker，根目录为 /workspace。"
+          />
 
-          <section className="panel">
-            <h3>Preview</h3>
-            {!fileWorkspace.activeFilePath ? (
-              <p className="muted">选择文件后可预览与编辑</p>
-            ) : (
-              <div className="preview-panel">
-                <div className="preview-meta">
-                  <strong>{fileWorkspace.activeFilePath}</strong>
-                  <span>
-                    {fileWorkspace.activeFilePreview
-                      ? `${fileWorkspace.activeFilePreview.contentType} · ${fileWorkspace.formatFileSize(fileWorkspace.activeFilePreview.size)}`
-                      : "-"}
-                  </span>
-                </div>
-                {fileWorkspace.filePreviewMode === "text" &&
-                fileWorkspace.activeFilePreview ? (
-                  <TextFilePreview
-                    path={fileWorkspace.activeFilePath}
-                    preview={fileWorkspace.activeFilePreview}
-                    draft={fileWorkspace.fileDraft}
-                    setDraft={fileWorkspace.setFileDraft}
-                    busy={fileWorkspace.fileBusy}
-                    onLoadMore={fileWorkspace.handleLoadMoreFile}
-                    onSave={fileWorkspace.saveActiveFile}
-                  />
-                ) : null}
-                {fileWorkspace.filePreviewMode === "image" && fileWorkspace.activeFileInlineUrl ? (
-                  <img
-                    src={fileWorkspace.activeFileInlineUrl}
-                    alt={fileWorkspace.activeFilePath}
-                    className="preview-image"
-                  />
-                ) : null}
-                {fileWorkspace.filePreviewMode === "pdf" && fileWorkspace.activeFileInlineUrl ? (
-                  <iframe
-                    title={fileWorkspace.activeFilePath}
-                    src={fileWorkspace.activeFileInlineUrl}
-                    className="preview-frame"
-                  />
-                ) : null}
-                {fileWorkspace.filePreviewMode === "binary" ? (
-                  <p className="muted">二进制文件不支持在线编辑，请使用下载查看。</p>
-                ) : null}
-                <div className="preview-actions">
-                  {fileWorkspace.activeFileDownloadUrl ? (
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => {
-                        if (fileWorkspace.activeFilePath) {
-                          fileWorkspace.downloadPath(fileWorkspace.activeFilePath);
-                        }
-                      }}
-                    >
-                      下载文件
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            )}
-          </section>
+          <SessionTerminalPanel terminal={sessionTerminal} />
+
+          <FileWorkspacePanel
+            title="全局文件管理"
+            workspace={globalFileWorkspace}
+            identity={{
+              label: "userId",
+              value: globalFileUserId,
+              onChange: setGlobalFileUserId,
+              placeholder: "u-alice",
+            }}
+            hint="用于访问 RBAC 控制的全局文件树（/files）。"
+          />
 
           <section className="panel">
             <h3>Run Timeline</h3>

@@ -1,6 +1,9 @@
-import { Router } from "express";
+import { type Response, Router } from "express";
 import { z } from "zod";
-import type { LifecycleManager } from "../services/lifecycle-manager.js";
+import {
+  SessionWorkerNotFoundError,
+  type LifecycleManager,
+} from "../services/lifecycle-manager.js";
 
 const activateSchema = z.object({
   appId: z.string().min(1),
@@ -61,6 +64,62 @@ const syncSessionSchema = z.object({
   reason: z.enum(["message.stop", "run.finished", "pre.stop", "pre.remove"]),
   runId: z.string().min(1).optional(),
 });
+
+const workspaceTreeSchema = z.object({
+  path: z.string().optional(),
+});
+
+const workspaceReadSchema = z.object({
+  path: z.string().min(1),
+  offset: z.coerce.number().int().nonnegative().optional(),
+  limit: z.coerce.number().int().positive().max(1024 * 1024).optional(),
+});
+
+const workspaceWriteSchema = z
+  .object({
+    path: z.string().min(1),
+    content: z.string(),
+    encoding: z.enum(["utf8", "base64"]).optional(),
+  })
+  .strict();
+
+const workspaceUploadSchema = z
+  .object({
+    path: z.string().min(1),
+    contentBase64: z.string(),
+  })
+  .strict();
+
+const workspaceRenameSchema = z
+  .object({
+    path: z.string().min(1),
+    newPath: z.string().min(1),
+  })
+  .strict();
+
+const workspaceDeleteSchema = z.object({
+  path: z.string().min(1),
+});
+
+const workspaceMkdirSchema = z
+  .object({
+    path: z.string().min(1),
+  })
+  .strict();
+
+const workspaceDownloadSchema = z.object({
+  path: z.string().min(1),
+  inline: z.string().optional(),
+});
+
+const ttyExecSchema = z
+  .object({
+    command: z.string().min(1),
+    cwd: z.string().optional(),
+    timeoutMs: z.number().int().positive().max(120_000).optional(),
+    maxOutputBytes: z.number().int().positive().max(2 * 1024 * 1024).optional(),
+  })
+  .strict();
 
 export function createSessionWorkersRouter(
   lifecycleManager: LifecycleManager,
@@ -133,5 +192,210 @@ export function createSessionWorkersRouter(
     return res.json(result);
   });
 
+  router.get("/session-workers/:sessionId/workspace/tree", async (req, res) => {
+    const payload = workspaceTreeSchema.safeParse(req.query);
+    if (!payload.success) {
+      return res.status(400).json({ error: payload.error.flatten() });
+    }
+
+    try {
+      const result = await lifecycleManager.listWorkspaceTree(
+        req.params.sessionId,
+        payload.data.path ?? "/workspace",
+      );
+      return res.json(result);
+    } catch (error) {
+      return sendRouteError(res, error);
+    }
+  });
+
+  router.get("/session-workers/:sessionId/workspace/file", async (req, res) => {
+    const payload = workspaceReadSchema.safeParse(req.query);
+    if (!payload.success) {
+      return res.status(400).json({ error: payload.error.flatten() });
+    }
+
+    try {
+      const result = await lifecycleManager.readWorkspaceFile(req.params.sessionId, {
+        path: payload.data.path,
+        offset: payload.data.offset,
+        limit: payload.data.limit,
+      });
+      return res.json(result);
+    } catch (error) {
+      return sendRouteError(res, error);
+    }
+  });
+
+  router.put("/session-workers/:sessionId/workspace/file", async (req, res) => {
+    const payload = workspaceWriteSchema.safeParse(req.body ?? {});
+    if (!payload.success) {
+      return res.status(400).json({ error: payload.error.flatten() });
+    }
+
+    try {
+      const result = await lifecycleManager.writeWorkspaceFile(req.params.sessionId, {
+        path: payload.data.path,
+        content: payload.data.content,
+        encoding: payload.data.encoding,
+      });
+      return res.json({
+        ok: true,
+        ...result,
+      });
+    } catch (error) {
+      return sendRouteError(res, error);
+    }
+  });
+
+  router.post("/session-workers/:sessionId/workspace/upload", async (req, res) => {
+    const payload = workspaceUploadSchema.safeParse(req.body ?? {});
+    if (!payload.success) {
+      return res.status(400).json({ error: payload.error.flatten() });
+    }
+
+    try {
+      const result = await lifecycleManager.uploadWorkspaceFile(req.params.sessionId, {
+        path: payload.data.path,
+        contentBase64: payload.data.contentBase64,
+      });
+      return res.status(201).json({
+        ok: true,
+        ...result,
+      });
+    } catch (error) {
+      return sendRouteError(res, error);
+    }
+  });
+
+  router.post("/session-workers/:sessionId/workspace/rename", async (req, res) => {
+    const payload = workspaceRenameSchema.safeParse(req.body ?? {});
+    if (!payload.success) {
+      return res.status(400).json({ error: payload.error.flatten() });
+    }
+
+    try {
+      const result = await lifecycleManager.renameWorkspacePath(req.params.sessionId, {
+        path: payload.data.path,
+        newPath: payload.data.newPath,
+      });
+      return res.json({
+        ok: true,
+        ...result,
+      });
+    } catch (error) {
+      return sendRouteError(res, error);
+    }
+  });
+
+  router.delete("/session-workers/:sessionId/workspace/file", async (req, res) => {
+    const payload = workspaceDeleteSchema.safeParse(req.query);
+    if (!payload.success) {
+      return res.status(400).json({ error: payload.error.flatten() });
+    }
+
+    try {
+      const result = await lifecycleManager.deleteWorkspacePath(
+        req.params.sessionId,
+        payload.data.path,
+      );
+      return res.json({
+        ok: true,
+        ...result,
+      });
+    } catch (error) {
+      return sendRouteError(res, error);
+    }
+  });
+
+  router.post("/session-workers/:sessionId/workspace/mkdir", async (req, res) => {
+    const payload = workspaceMkdirSchema.safeParse(req.body ?? {});
+    if (!payload.success) {
+      return res.status(400).json({ error: payload.error.flatten() });
+    }
+
+    try {
+      const result = await lifecycleManager.mkdirWorkspacePath(
+        req.params.sessionId,
+        payload.data.path,
+      );
+      return res.status(201).json({
+        ok: true,
+        ...result,
+      });
+    } catch (error) {
+      return sendRouteError(res, error);
+    }
+  });
+
+  router.get("/session-workers/:sessionId/workspace/download", async (req, res) => {
+    const payload = workspaceDownloadSchema.safeParse(req.query);
+    if (!payload.success) {
+      return res.status(400).json({ error: payload.error.flatten() });
+    }
+
+    try {
+      const file = await lifecycleManager.downloadWorkspaceFile(
+        req.params.sessionId,
+        payload.data.path,
+      );
+      const inline = payload.data.inline === "1" || payload.data.inline === "true";
+
+      res.setHeader("content-type", file.contentType);
+      res.setHeader(
+        "content-disposition",
+        `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(file.fileName)}"`,
+      );
+      return res.status(200).send(file.content);
+    } catch (error) {
+      return sendRouteError(res, error);
+    }
+  });
+
+  router.post("/session-workers/:sessionId/tty/exec", async (req, res) => {
+    const payload = ttyExecSchema.safeParse(req.body ?? {});
+    if (!payload.success) {
+      return res.status(400).json({ error: payload.error.flatten() });
+    }
+
+    try {
+      const result = await lifecycleManager.executeWorkspaceCommand(
+        req.params.sessionId,
+        payload.data,
+      );
+      return res.json({
+        ok: true,
+        ...result,
+      });
+    } catch (error) {
+      return sendRouteError(res, error);
+    }
+  });
+
   return router;
+}
+
+function sendRouteError(res: Response, error: unknown) {
+  if (error instanceof SessionWorkerNotFoundError) {
+    return res.status(404).json({ error: error.message });
+  }
+
+  const withStatus = error as {
+    status?: unknown;
+    responseBody?: unknown;
+    message?: unknown;
+  };
+  if (typeof withStatus.status === "number" && withStatus.status >= 400) {
+    const message =
+      typeof withStatus.responseBody === "string" && withStatus.responseBody.length > 0
+        ? withStatus.responseBody
+        : typeof withStatus.message === "string" && withStatus.message.length > 0
+          ? withStatus.message
+          : "executor request failed";
+    return res.status(withStatus.status).json({ error: message });
+  }
+
+  return res.status(500).json({
+    error: error instanceof Error ? error.message : String(error),
+  });
 }

@@ -593,6 +593,10 @@ button.secondary {
   gap: 6px;
 }
 
+.files-hint {
+  margin-top: 8px;
+}
+
 .upload-label {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -661,6 +665,11 @@ button.secondary {
   gap: 8px;
 }
 
+.preview-divider {
+  margin: 10px 0;
+  border-top: 1px dashed var(--line);
+}
+
 .preview-meta {
   display: grid;
   gap: 4px;
@@ -704,6 +713,89 @@ button.secondary {
   border-radius: 8px;
 }
 
+.tty-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tty-controls label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tty-controls input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 14px;
+  color: var(--text);
+  background: #fff;
+}
+
+.tty-command {
+  grid-column: 1 / -1;
+}
+
+.tty-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+}
+
+.tty-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.tty-entry {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-soft);
+  padding: 8px;
+}
+
+.tty-entry header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tty-entry pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+  font-size: 12px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.tty-stdout {
+  color: #0b3a66;
+}
+
+.tty-stderr {
+  color: #7a1e1e;
+}
+
+.tty-meta {
+  margin-top: 4px;
+}
+
+.panel-error {
+  padding: 0;
+  margin-top: 8px;
+}
+
 .muted {
   margin: 0;
   color: var(--muted);
@@ -728,6 +820,10 @@ button.secondary {
   }
 
   .files-path-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tty-controls {
     grid-template-columns: 1fr;
   }
 }

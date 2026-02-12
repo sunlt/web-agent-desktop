@@ -1,5 +1,9 @@
 import type {
   ExecutorClient,
+  ExecutorWorkspaceFileDownloadResult,
+  ExecutorWorkspaceFileReadResult,
+  ExecutorWorkspaceFileTreeResult,
+  ExecutorWorkspaceTerminalResult,
   ExecutorWorkspaceValidationResult,
 } from "../ports/executor-client.js";
 import type {
@@ -52,6 +56,18 @@ export class ExecutorRequestError extends Error {
   }
 }
 
+interface ExecutorRequestInput {
+  readonly method: "GET" | "POST" | "PUT" | "DELETE";
+  readonly path: string;
+  readonly payload?: unknown;
+  readonly trace?: ExecutionTraceMeta;
+}
+
+interface BinaryResponse {
+  readonly contentType: string;
+  readonly body: Buffer;
+}
+
 export class ExecutorHttpClient
   implements ExecutorClient, WorkspaceSyncClient
 {
@@ -84,7 +100,12 @@ export class ExecutorHttpClient
     };
     trace?: ExecutionTraceMeta;
   }): Promise<void> {
-    await this.post("/workspace/restore", input, input.trace);
+    await this.requestJson({
+      method: "POST",
+      path: "/workspace/restore",
+      payload: input,
+      trace: input.trace,
+    });
   }
 
   async linkAgentData(input: {
@@ -92,7 +113,12 @@ export class ExecutorHttpClient
     containerId: string;
     trace?: ExecutionTraceMeta;
   }): Promise<void> {
-    await this.post("/workspace/link-agent-data", input, input.trace);
+    await this.requestJson({
+      method: "POST",
+      path: "/workspace/link-agent-data",
+      payload: input,
+      trace: input.trace,
+    });
   }
 
   async validateWorkspace(input: {
@@ -101,10 +127,15 @@ export class ExecutorHttpClient
     requiredPaths: readonly string[];
     trace?: ExecutionTraceMeta;
   }): Promise<ExecutorWorkspaceValidationResult> {
-    const body = await this.post<{
+    const body = await this.requestJson<{
       ok?: boolean;
       missingRequiredPaths?: string[];
-    }>("/workspace/validate", input, input.trace);
+    }>({
+      method: "POST",
+      path: "/workspace/validate",
+      payload: input,
+      trace: input.trace,
+    });
 
     return {
       ok: body?.ok !== false,
@@ -113,28 +144,265 @@ export class ExecutorHttpClient
   }
 
   async syncWorkspace(request: WorkspaceSyncRequest): Promise<void> {
-    await this.post("/workspace/sync", request, request.trace);
+    await this.requestJson({
+      method: "POST",
+      path: "/workspace/sync",
+      payload: request,
+      trace: request.trace,
+    });
   }
 
-  private async post<T = unknown>(
-    path: string,
-    payload: unknown,
-    trace?: ExecutionTraceMeta,
-  ): Promise<T> {
+  async listWorkspaceTree(input: {
+    sessionId: string;
+    containerId: string;
+    path: string;
+    trace?: ExecutionTraceMeta;
+  }): Promise<ExecutorWorkspaceFileTreeResult> {
+    return await this.requestJson<ExecutorWorkspaceFileTreeResult>({
+      method: "GET",
+      path: withQuery("/workspace/tree", {
+        containerId: input.containerId,
+        path: input.path,
+      }),
+      trace: input.trace,
+    });
+  }
+
+  async readWorkspaceFile(input: {
+    sessionId: string;
+    containerId: string;
+    path: string;
+    offset?: number;
+    limit?: number;
+    trace?: ExecutionTraceMeta;
+  }): Promise<ExecutorWorkspaceFileReadResult> {
+    return await this.requestJson<ExecutorWorkspaceFileReadResult>({
+      method: "GET",
+      path: withQuery("/workspace/file", {
+        containerId: input.containerId,
+        path: input.path,
+        ...(typeof input.offset === "number" ? { offset: String(input.offset) } : {}),
+        ...(typeof input.limit === "number" ? { limit: String(input.limit) } : {}),
+      }),
+      trace: input.trace,
+    });
+  }
+
+  async writeWorkspaceFile(input: {
+    sessionId: string;
+    containerId: string;
+    path: string;
+    content: string;
+    encoding?: "utf8" | "base64";
+    trace?: ExecutionTraceMeta;
+  }): Promise<{ path: string; size: number }> {
+    const body = await this.requestJson<{ path: string; size: number }>({
+      method: "PUT",
+      path: "/workspace/file",
+      payload: {
+        containerId: input.containerId,
+        path: input.path,
+        content: input.content,
+        encoding: input.encoding,
+      },
+      trace: input.trace,
+    });
+    return {
+      path: body.path,
+      size: body.size,
+    };
+  }
+
+  async uploadWorkspaceFile(input: {
+    sessionId: string;
+    containerId: string;
+    path: string;
+    contentBase64: string;
+    trace?: ExecutionTraceMeta;
+  }): Promise<{ path: string; size: number }> {
+    const body = await this.requestJson<{ path: string; size: number }>({
+      method: "POST",
+      path: "/workspace/upload",
+      payload: {
+        containerId: input.containerId,
+        path: input.path,
+        contentBase64: input.contentBase64,
+      },
+      trace: input.trace,
+    });
+    return {
+      path: body.path,
+      size: body.size,
+    };
+  }
+
+  async renameWorkspacePath(input: {
+    sessionId: string;
+    containerId: string;
+    path: string;
+    newPath: string;
+    trace?: ExecutionTraceMeta;
+  }): Promise<{ path: string; newPath: string }> {
+    const body = await this.requestJson<{ path: string; newPath: string }>({
+      method: "POST",
+      path: "/workspace/rename",
+      payload: {
+        containerId: input.containerId,
+        path: input.path,
+        newPath: input.newPath,
+      },
+      trace: input.trace,
+    });
+    return {
+      path: body.path,
+      newPath: body.newPath,
+    };
+  }
+
+  async deleteWorkspacePath(input: {
+    sessionId: string;
+    containerId: string;
+    path: string;
+    trace?: ExecutionTraceMeta;
+  }): Promise<{ path: string; deleted: true }> {
+    const body = await this.requestJson<{ path: string; deleted: true }>({
+      method: "DELETE",
+      path: withQuery("/workspace/file", {
+        containerId: input.containerId,
+        path: input.path,
+      }),
+      trace: input.trace,
+    });
+    return {
+      path: body.path,
+      deleted: true,
+    };
+  }
+
+  async mkdirWorkspacePath(input: {
+    sessionId: string;
+    containerId: string;
+    path: string;
+    trace?: ExecutionTraceMeta;
+  }): Promise<{ path: string }> {
+    const body = await this.requestJson<{ path: string }>({
+      method: "POST",
+      path: "/workspace/mkdir",
+      payload: {
+        containerId: input.containerId,
+        path: input.path,
+      },
+      trace: input.trace,
+    });
+    return {
+      path: body.path,
+    };
+  }
+
+  async downloadWorkspaceFile(input: {
+    sessionId: string;
+    containerId: string;
+    path: string;
+    trace?: ExecutionTraceMeta;
+  }): Promise<ExecutorWorkspaceFileDownloadResult> {
+    const response = await this.requestBinary({
+      method: "GET",
+      path: withQuery("/workspace/download", {
+        containerId: input.containerId,
+        path: input.path,
+      }),
+      trace: input.trace,
+    });
+
+    return {
+      path: input.path,
+      fileName: basenameFromPath(input.path),
+      contentType: response.contentType,
+      content: response.body,
+    };
+  }
+
+  async executeWorkspaceCommand(input: {
+    sessionId: string;
+    containerId: string;
+    command: string;
+    cwd?: string;
+    timeoutMs?: number;
+    maxOutputBytes?: number;
+    trace?: ExecutionTraceMeta;
+  }): Promise<ExecutorWorkspaceTerminalResult> {
+    return await this.requestJson<ExecutorWorkspaceTerminalResult>({
+      method: "POST",
+      path: "/tty/exec",
+      payload: {
+        containerId: input.containerId,
+        command: input.command,
+        cwd: input.cwd,
+        timeoutMs: input.timeoutMs,
+        maxOutputBytes: input.maxOutputBytes,
+      },
+      trace: input.trace,
+    });
+  }
+
+  private async requestJson<T = unknown>(input: ExecutorRequestInput): Promise<T> {
+    const response = await this.request(input);
+    const text = await response.text();
+    const json = safeParseJson(text);
+    if (!response.ok) {
+      throw new ExecutorRequestError({
+        kind: "http",
+        path: input.path,
+        attempt: this.maxRetries + 1,
+        maxAttempts: this.maxRetries + 1,
+        status: response.status,
+        responseBody: stringifyBody(json ?? text),
+        retryable: this.retryStatusCodes.has(response.status),
+      });
+    }
+    return (json as T) ?? ({} as T);
+  }
+
+  private async requestBinary(input: ExecutorRequestInput): Promise<BinaryResponse> {
+    const response = await this.request(input);
+    if (!response.ok) {
+      const text = await response.text();
+      const json = safeParseJson(text);
+      throw new ExecutorRequestError({
+        kind: "http",
+        path: input.path,
+        attempt: this.maxRetries + 1,
+        maxAttempts: this.maxRetries + 1,
+        status: response.status,
+        responseBody: stringifyBody(json ?? text),
+        retryable: this.retryStatusCodes.has(response.status),
+      });
+    }
+
+    const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+    const body = Buffer.from(await response.arrayBuffer());
+    return {
+      contentType,
+      body,
+    };
+  }
+
+  private async request(input: ExecutorRequestInput): Promise<Response> {
     const maxAttempts = this.maxRetries + 1;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        return await this.postOnce<T>(path, payload, trace, attempt, maxAttempts);
+        return await this.requestOnce(input, attempt, maxAttempts);
       } catch (error) {
         const requestError =
           error instanceof ExecutorRequestError
             ? error
             : toExecutorRequestError({
                 error,
-                path,
+                path: input.path,
                 attempt,
                 maxAttempts,
               });
+
         if (!requestError.retryable || attempt >= maxAttempts) {
           throw requestError;
         }
@@ -144,7 +412,7 @@ export class ExecutorHttpClient
 
     throw new ExecutorRequestError({
       kind: "network",
-      path,
+      path: input.path,
       attempt: maxAttempts,
       maxAttempts,
       retryable: false,
@@ -152,49 +420,52 @@ export class ExecutorHttpClient
     });
   }
 
-  private async postOnce<T = unknown>(
-    path: string,
-    payload: unknown,
-    trace: ExecutionTraceMeta | undefined,
+  private async requestOnce(
+    input: ExecutorRequestInput,
     attempt: number,
     maxAttempts: number,
-  ): Promise<T> {
+  ): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
     try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
-        method: "POST",
+      const hasBody =
+        input.method === "POST" ||
+        input.method === "PUT";
+
+      const response = await fetch(`${this.baseUrl}${input.path}`, {
+        method: input.method,
         headers: {
-          "content-type": "application/json",
-          ...(trace ? traceToHeaders(trace) : {}),
+          ...(hasBody ? { "content-type": "application/json" } : {}),
+          ...(input.trace ? traceToHeaders(input.trace) : {}),
           ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
         },
-        body: JSON.stringify(payload),
+        ...(hasBody ? { body: JSON.stringify(input.payload ?? {}) } : {}),
         signal: controller.signal,
       });
 
-      const text = await response.text();
-      const json = safeParseJson(text);
-      if (!response.ok) {
+      if (!response.ok && this.retryStatusCodes.has(response.status)) {
+        const text = await response.text();
+        const json = safeParseJson(text);
         throw new ExecutorRequestError({
           kind: "http",
-          path,
+          path: input.path,
           attempt,
           maxAttempts,
           status: response.status,
           responseBody: stringifyBody(json ?? text),
-          retryable: this.retryStatusCodes.has(response.status),
+          retryable: true,
         });
       }
 
-      return (json as T) ?? ({} as T);
+      return response;
     } catch (error) {
       if (error instanceof ExecutorRequestError) {
         throw error;
       }
       throw toExecutorRequestError({
         error,
-        path,
+        path: input.path,
         attempt,
         maxAttempts,
       });
@@ -266,9 +537,7 @@ function toExecutorRequestError(input: {
 }
 
 function isAbortError(error: unknown): boolean {
-  return (
-    error instanceof DOMException && error.name === "AbortError"
-  );
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function formatExecutorErrorMessage(input: {
@@ -295,4 +564,19 @@ function truncate(input: string, max: number): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withQuery(path: string, params: Record<string, string>): string {
+  const query = new URLSearchParams(params);
+  const serialized = query.toString();
+  if (!serialized) {
+    return path;
+  }
+  return `${path}?${serialized}`;
+}
+
+function basenameFromPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const segments = normalized.split("/").filter((item) => item.length > 0);
+  return segments.at(-1) ?? "file";
 }

@@ -571,21 +571,20 @@ test.describe("Portal Chat Workbench", () => {
     await mockPortalApi(page, mockState);
     await page.goto("/");
 
-    const filesPanel = page.locator(".panel").filter({ hasText: "Files" });
+    const filesPanel = page.locator(".panel").filter({ hasText: "全局文件管理" });
     await filesPanel.getByRole("button", { name: "刷新" }).click();
     await filesPanel.getByRole("button", { name: /readme.txt/i }).click();
 
-    const preview = page.locator(".panel").filter({ hasText: "Preview" });
-    await expect(preview.locator(".code-lines")).toContainText("hello file");
+    await expect(filesPanel.locator(".code-lines")).toContainText("hello file");
 
-    await preview.getByRole("button", { name: "编辑" }).click();
+    await filesPanel.getByRole("button", { name: "编辑" }).click();
 
-    const editor = preview.locator(".file-editor");
+    const editor = filesPanel.locator(".file-editor");
     await expect(editor).toBeVisible();
     await expect(editor).toHaveValue("hello file");
 
     await editor.fill("hello updated file");
-    await preview.getByRole("button", { name: "保存" }).click();
+    await filesPanel.getByRole("button", { name: "保存" }).click();
 
     expect(mockState.fileWrites).toEqual([
       {
@@ -652,16 +651,101 @@ test.describe("Portal Chat Workbench", () => {
     await mockPortalApi(page, mockState);
     await page.goto("/");
 
-    const filesPanel = page.locator(".panel").filter({ hasText: "Files" });
+    const filesPanel = page.locator(".panel").filter({ hasText: "全局文件管理" });
     await filesPanel.getByRole("button", { name: "刷新" }).click();
     await filesPanel.getByRole("button", { name: /huge.txt/i }).click();
 
-    const preview = page.locator(".panel").filter({ hasText: "Preview" });
-    await expect(preview.locator(".text-preview-paging")).toContainText("第 1 / 2 页");
-    await expect(preview.locator(".code-lines")).toContainText("line-001");
+    await expect(filesPanel.locator(".text-preview-paging")).toContainText("第 1 / 2 页");
+    await expect(filesPanel.locator(".code-lines")).toContainText("line-001");
 
-    await preview.getByRole("button", { name: "下一页" }).click();
-    await expect(preview.locator(".text-preview-paging")).toContainText("第 2 / 2 页");
-    await expect(preview.locator(".code-lines")).toContainText("line-220");
+    await filesPanel.getByRole("button", { name: "下一页" }).click();
+    await expect(filesPanel.locator(".text-preview-paging")).toContainText("第 2 / 2 页");
+    await expect(filesPanel.locator(".code-lines")).toContainText("line-220");
+  });
+
+  test("执行器工作目录与 TTY 面板可联动调用会话接口", async ({ page }) => {
+    const runId = "run-e2e-executor-workspace-1";
+    const now = "2026-02-12T15:20:00.000Z";
+    const sessionId = "chat-e2e-executor-1";
+
+    const mockState: MockApiState = {
+      runId,
+      pendingRequests: [],
+      todoItems: [],
+      todoEvents: [],
+      replyPayloads: [],
+      historyChats: [
+        {
+          chatId: sessionId,
+          sessionId,
+          title: "执行器会话",
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          createdAt: now,
+          updatedAt: now,
+          lastMessageAt: null,
+        },
+      ],
+      historyMessages: {
+        [sessionId]: [],
+      },
+      sseBody: "",
+      workspaceSessionTreePath: "/workspace",
+      workspaceSessionEntries: [
+        {
+          name: "notes.md",
+          path: "/workspace/notes.md",
+          isDirectory: false,
+          size: 20,
+        },
+      ],
+      workspaceSessionReadByPath: {
+        "/workspace/notes.md": {
+          path: "/workspace/notes.md",
+          content: "executor workspace file",
+          contentType: "text/plain; charset=utf-8",
+          encoding: "utf8",
+          size: 20,
+          nextOffset: null,
+          truncated: false,
+        },
+      },
+      ttyExecPayloads: [],
+      ttyExecResult: {
+        command: "pwd",
+        cwd: "/workspace",
+        exitCode: 0,
+        stdout: "/workspace\n",
+        stderr: "",
+        durationMs: 12,
+        timedOut: false,
+        truncated: false,
+      },
+    };
+
+    await mockPortalApi(page, mockState);
+    await page.goto("/");
+
+    const executorPanel = page.locator(".panel").filter({ hasText: "执行器工作目录文件" });
+    await executorPanel.getByLabel("sessionId").fill(sessionId);
+    await executorPanel.getByRole("button", { name: "刷新" }).click();
+    await executorPanel.getByRole("button", { name: /notes.md/i }).click();
+    await expect(executorPanel.locator(".code-lines")).toContainText("executor workspace file");
+
+    const ttyPanel = page
+      .locator(".panel")
+      .filter({ has: page.getByRole("heading", { name: "TTY" }) });
+    await ttyPanel.getByLabel("command").fill("pwd");
+    await ttyPanel.getByRole("button", { name: "执行" }).click();
+    await expect(ttyPanel.locator(".tty-meta")).toContainText("exit=0");
+    await expect(ttyPanel.locator(".tty-stdout")).toContainText("/workspace");
+    expect(mockState.ttyExecPayloads).toEqual([
+      {
+        sessionId,
+        command: "pwd",
+        cwd: "/workspace",
+        timeoutMs: 30000,
+      },
+    ]);
   });
 });

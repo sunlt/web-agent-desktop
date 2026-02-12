@@ -88,6 +88,26 @@ export type MockApiState = {
   fileEntries?: FileEntry[];
   fileReadByPath?: Record<string, FileReadPayload>;
   fileWrites?: Array<{ path: string; content: string }>;
+  workspaceSessionTreePath?: string;
+  workspaceSessionEntries?: FileEntry[];
+  workspaceSessionReadByPath?: Record<string, FileReadPayload>;
+  workspaceSessionWrites?: Array<{ path: string; content: string }>;
+  ttyExecPayloads?: Array<{
+    sessionId: string;
+    command: string;
+    cwd?: string;
+    timeoutMs?: number;
+  }>;
+  ttyExecResult?: {
+    command?: string;
+    cwd?: string;
+    exitCode?: number;
+    stdout?: string;
+    stderr?: string;
+    durationMs?: number;
+    timedOut?: boolean;
+    truncated?: boolean;
+  };
   storeApps?: StoreApp[];
   runStartPayloads?: Array<Record<string, unknown>>;
   streamReconnectBody?: string;
@@ -106,6 +126,10 @@ export async function mockPortalApi(page: Page, state: MockApiState): Promise<vo
   state.fileEntries ??= [];
   state.fileReadByPath ??= {};
   state.fileWrites ??= [];
+  state.workspaceSessionEntries ??= [];
+  state.workspaceSessionReadByPath ??= {};
+  state.workspaceSessionWrites ??= [];
+  state.ttyExecPayloads ??= [];
   state.storeApps ??= [];
   state.runStartPayloads ??= [];
   state.streamReconnectCalls ??= 0;
@@ -241,6 +265,249 @@ export async function mockPortalApi(page: Page, state: MockApiState): Promise<vo
         body: JSON.stringify({
           total: state.storeApps.length,
           apps: state.storeApps,
+        }),
+      });
+    }
+
+    const workspaceRouteMatch = path.match(
+      /^\/api\/session-workers\/([^/]+)\/workspace\/(tree|file|upload|rename|mkdir|download)$/,
+    );
+    if (workspaceRouteMatch) {
+      const action = workspaceRouteMatch[2];
+
+      if (action === "tree" && method === "GET") {
+        const targetPath =
+          url.searchParams.get("path") ?? state.workspaceSessionTreePath ?? "/workspace";
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            path: targetPath,
+            entries: state.workspaceSessionEntries,
+          }),
+        });
+      }
+
+      if (action === "file" && method === "GET") {
+        const filePath = url.searchParams.get("path");
+        const filePayload = filePath
+          ? state.workspaceSessionReadByPath[filePath]
+          : undefined;
+        if (!filePayload || !filePath) {
+          return route.fulfill({
+            status: 404,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "file not found" }),
+          });
+        }
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...filePayload,
+            fileName: filePath.split("/").at(-1) ?? "unknown",
+            offset: 0,
+            limit: filePayload.size,
+            readBytes: filePayload.size,
+          }),
+        });
+      }
+
+      if (action === "file" && method === "PUT") {
+        const raw = request.postData() ?? "{}";
+        const payload = JSON.parse(raw) as {
+          path: string;
+          content: string;
+        };
+        state.workspaceSessionWrites.push({
+          path: payload.path,
+          content: payload.content,
+        });
+        state.workspaceSessionReadByPath[payload.path] = {
+          path: payload.path,
+          content: payload.content,
+          contentType: "text/plain; charset=utf-8",
+          encoding: "utf8",
+          size: payload.content.length,
+          nextOffset: null,
+          truncated: false,
+        };
+        if (!state.workspaceSessionEntries.some((entry) => entry.path === payload.path)) {
+          state.workspaceSessionEntries.push({
+            name: payload.path.split("/").at(-1) ?? payload.path,
+            path: payload.path,
+            isDirectory: false,
+            size: payload.content.length,
+          });
+        }
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            path: payload.path,
+            size: payload.content.length,
+          }),
+        });
+      }
+
+      if (action === "upload" && method === "POST") {
+        const raw = request.postData() ?? "{}";
+        const payload = JSON.parse(raw) as {
+          path: string;
+          contentBase64: string;
+        };
+        const decoded = Buffer.from(payload.contentBase64, "base64").toString("utf8");
+        state.workspaceSessionReadByPath[payload.path] = {
+          path: payload.path,
+          content: decoded,
+          contentType: "application/octet-stream",
+          encoding: "base64",
+          size: decoded.length,
+          nextOffset: null,
+          truncated: false,
+        };
+        if (!state.workspaceSessionEntries.some((entry) => entry.path === payload.path)) {
+          state.workspaceSessionEntries.push({
+            name: payload.path.split("/").at(-1) ?? payload.path,
+            path: payload.path,
+            isDirectory: false,
+            size: decoded.length,
+          });
+        }
+        return route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true, path: payload.path }),
+        });
+      }
+
+      if (action === "rename" && method === "POST") {
+        const raw = request.postData() ?? "{}";
+        const payload = JSON.parse(raw) as {
+          path: string;
+          newPath: string;
+        };
+        const filePayload = state.workspaceSessionReadByPath[payload.path];
+        if (filePayload) {
+          state.workspaceSessionReadByPath[payload.newPath] = {
+            ...filePayload,
+            path: payload.newPath,
+          };
+          delete state.workspaceSessionReadByPath[payload.path];
+        }
+        state.workspaceSessionEntries = state.workspaceSessionEntries.map((entry) =>
+          entry.path === payload.path
+            ? {
+                ...entry,
+                path: payload.newPath,
+                name: payload.newPath.split("/").at(-1) ?? payload.newPath,
+              }
+            : entry,
+        );
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true, path: payload.path, newPath: payload.newPath }),
+        });
+      }
+
+      if (action === "file" && method === "DELETE") {
+        const filePath = url.searchParams.get("path") ?? "";
+        delete state.workspaceSessionReadByPath[filePath];
+        state.workspaceSessionEntries = state.workspaceSessionEntries.filter(
+          (entry) => entry.path !== filePath,
+        );
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true, path: filePath, deleted: true }),
+        });
+      }
+
+      if (action === "mkdir" && method === "POST") {
+        const raw = request.postData() ?? "{}";
+        const payload = JSON.parse(raw) as { path: string };
+        if (!state.workspaceSessionEntries.some((entry) => entry.path === payload.path)) {
+          state.workspaceSessionEntries.push({
+            name: payload.path.split("/").at(-1) ?? payload.path,
+            path: payload.path,
+            isDirectory: true,
+            size: 0,
+          });
+        }
+        return route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true, path: payload.path }),
+        });
+      }
+
+      if (action === "download" && method === "GET") {
+        const filePath = url.searchParams.get("path");
+        const filePayload = filePath
+          ? state.workspaceSessionReadByPath[filePath]
+          : undefined;
+        if (!filePath || !filePayload) {
+          return route.fulfill({
+            status: 404,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "file not found" }),
+          });
+        }
+        if (filePayload.encoding === "base64") {
+          return route.fulfill({
+            status: 200,
+            headers: {
+              "content-type": filePayload.contentType,
+            },
+            body: Buffer.from(filePayload.content, "utf8"),
+          });
+        }
+        return route.fulfill({
+          status: 200,
+          headers: {
+            "content-type": filePayload.contentType,
+          },
+          body: filePayload.content,
+        });
+      }
+
+      return route.fulfill({
+        status: 405,
+        contentType: "application/json",
+        body: JSON.stringify({ error: `method not allowed: ${method} ${path}` }),
+      });
+    }
+
+    const ttyRouteMatch = path.match(/^\/api\/session-workers\/([^/]+)\/tty\/exec$/);
+    if (ttyRouteMatch && method === "POST") {
+      const sessionId = decodeURIComponent(ttyRouteMatch[1] ?? "");
+      const raw = request.postData() ?? "{}";
+      const payload = JSON.parse(raw) as {
+        command?: string;
+        cwd?: string;
+        timeoutMs?: number;
+      };
+      state.ttyExecPayloads.push({
+        sessionId,
+        command: payload.command ?? "",
+        cwd: payload.cwd,
+        timeoutMs: payload.timeoutMs,
+      });
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          command: state.ttyExecResult?.command ?? payload.command ?? "",
+          cwd: state.ttyExecResult?.cwd ?? payload.cwd ?? "/workspace",
+          exitCode: state.ttyExecResult?.exitCode ?? 0,
+          stdout: state.ttyExecResult?.stdout ?? "",
+          stderr: state.ttyExecResult?.stderr ?? "",
+          durationMs: state.ttyExecResult?.durationMs ?? 8,
+          timedOut: state.ttyExecResult?.timedOut ?? false,
+          truncated: state.ttyExecResult?.truncated ?? false,
         }),
       });
     }

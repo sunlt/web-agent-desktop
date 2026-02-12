@@ -6,7 +6,13 @@ import {
 import { randomUUID } from "node:crypto";
 import type { RuntimeManifest } from "../domain/runtime-manifest.js";
 import type { DockerClient } from "../ports/docker-client.js";
-import type { ExecutorClient } from "../ports/executor-client.js";
+import type {
+  ExecutorClient,
+  ExecutorWorkspaceFileDownloadResult,
+  ExecutorWorkspaceFileReadResult,
+  ExecutorWorkspaceFileTreeResult,
+  ExecutorWorkspaceTerminalResult,
+} from "../ports/executor-client.js";
 import type {
   ExecutionTraceMeta,
   SyncReason,
@@ -52,6 +58,13 @@ export interface BatchResult {
   readonly succeeded: number;
   readonly skipped: number;
   readonly failed: number;
+}
+
+export class SessionWorkerNotFoundError extends Error {
+  constructor(sessionId: string) {
+    super(`session worker not found: ${sessionId}`);
+    this.name = "SessionWorkerNotFoundError";
+  }
 }
 
 export class LifecycleManager {
@@ -118,6 +131,196 @@ export class LifecycleManager {
 
   async getSessionWorker(sessionId: string): Promise<SessionWorker | null> {
     return this.repo.findBySessionId(sessionId);
+  }
+
+  async listWorkspaceTree(
+    sessionId: string,
+    path: string,
+  ): Promise<ExecutorWorkspaceFileTreeResult> {
+    const worker = await this.requireWorker(sessionId);
+    await this.touchWorker(worker);
+    return await this.executorClient.listWorkspaceTree({
+      sessionId: worker.sessionId,
+      containerId: worker.containerId,
+      path,
+      trace: this.newTrace({
+        sessionId: worker.sessionId,
+        executorId: worker.containerId,
+        operation: "workspace.tree",
+      }),
+    });
+  }
+
+  async readWorkspaceFile(
+    sessionId: string,
+    input: {
+      path: string;
+      offset?: number;
+      limit?: number;
+    },
+  ): Promise<ExecutorWorkspaceFileReadResult> {
+    const worker = await this.requireWorker(sessionId);
+    await this.touchWorker(worker);
+    return await this.executorClient.readWorkspaceFile({
+      sessionId: worker.sessionId,
+      containerId: worker.containerId,
+      path: input.path,
+      offset: input.offset,
+      limit: input.limit,
+      trace: this.newTrace({
+        sessionId: worker.sessionId,
+        executorId: worker.containerId,
+        operation: "workspace.file.read",
+      }),
+    });
+  }
+
+  async writeWorkspaceFile(
+    sessionId: string,
+    input: {
+      path: string;
+      content: string;
+      encoding?: "utf8" | "base64";
+    },
+  ): Promise<{ path: string; size: number }> {
+    const worker = await this.requireWorker(sessionId);
+    await this.touchWorker(worker);
+    return await this.executorClient.writeWorkspaceFile({
+      sessionId: worker.sessionId,
+      containerId: worker.containerId,
+      path: input.path,
+      content: input.content,
+      encoding: input.encoding,
+      trace: this.newTrace({
+        sessionId: worker.sessionId,
+        executorId: worker.containerId,
+        operation: "workspace.file.write",
+      }),
+    });
+  }
+
+  async uploadWorkspaceFile(
+    sessionId: string,
+    input: {
+      path: string;
+      contentBase64: string;
+    },
+  ): Promise<{ path: string; size: number }> {
+    const worker = await this.requireWorker(sessionId);
+    await this.touchWorker(worker);
+    return await this.executorClient.uploadWorkspaceFile({
+      sessionId: worker.sessionId,
+      containerId: worker.containerId,
+      path: input.path,
+      contentBase64: input.contentBase64,
+      trace: this.newTrace({
+        sessionId: worker.sessionId,
+        executorId: worker.containerId,
+        operation: "workspace.file.upload",
+      }),
+    });
+  }
+
+  async renameWorkspacePath(
+    sessionId: string,
+    input: {
+      path: string;
+      newPath: string;
+    },
+  ): Promise<{ path: string; newPath: string }> {
+    const worker = await this.requireWorker(sessionId);
+    await this.touchWorker(worker);
+    return await this.executorClient.renameWorkspacePath({
+      sessionId: worker.sessionId,
+      containerId: worker.containerId,
+      path: input.path,
+      newPath: input.newPath,
+      trace: this.newTrace({
+        sessionId: worker.sessionId,
+        executorId: worker.containerId,
+        operation: "workspace.file.rename",
+      }),
+    });
+  }
+
+  async deleteWorkspacePath(
+    sessionId: string,
+    path: string,
+  ): Promise<{ path: string; deleted: true }> {
+    const worker = await this.requireWorker(sessionId);
+    await this.touchWorker(worker);
+    return await this.executorClient.deleteWorkspacePath({
+      sessionId: worker.sessionId,
+      containerId: worker.containerId,
+      path,
+      trace: this.newTrace({
+        sessionId: worker.sessionId,
+        executorId: worker.containerId,
+        operation: "workspace.file.delete",
+      }),
+    });
+  }
+
+  async mkdirWorkspacePath(
+    sessionId: string,
+    path: string,
+  ): Promise<{ path: string }> {
+    const worker = await this.requireWorker(sessionId);
+    await this.touchWorker(worker);
+    return await this.executorClient.mkdirWorkspacePath({
+      sessionId: worker.sessionId,
+      containerId: worker.containerId,
+      path,
+      trace: this.newTrace({
+        sessionId: worker.sessionId,
+        executorId: worker.containerId,
+        operation: "workspace.file.mkdir",
+      }),
+    });
+  }
+
+  async downloadWorkspaceFile(
+    sessionId: string,
+    path: string,
+  ): Promise<ExecutorWorkspaceFileDownloadResult> {
+    const worker = await this.requireWorker(sessionId);
+    await this.touchWorker(worker);
+    return await this.executorClient.downloadWorkspaceFile({
+      sessionId: worker.sessionId,
+      containerId: worker.containerId,
+      path,
+      trace: this.newTrace({
+        sessionId: worker.sessionId,
+        executorId: worker.containerId,
+        operation: "workspace.file.download",
+      }),
+    });
+  }
+
+  async executeWorkspaceCommand(
+    sessionId: string,
+    input: {
+      command: string;
+      cwd?: string;
+      timeoutMs?: number;
+      maxOutputBytes?: number;
+    },
+  ): Promise<ExecutorWorkspaceTerminalResult> {
+    const worker = await this.requireWorker(sessionId);
+    await this.touchWorker(worker);
+    return await this.executorClient.executeWorkspaceCommand({
+      sessionId: worker.sessionId,
+      containerId: worker.containerId,
+      command: input.command,
+      cwd: input.cwd,
+      timeoutMs: input.timeoutMs,
+      maxOutputBytes: input.maxOutputBytes,
+      trace: this.newTrace({
+        sessionId: worker.sessionId,
+        executorId: worker.containerId,
+        operation: "tty.exec",
+      }),
+    });
   }
 
   async syncSessionWorkspace(
@@ -250,6 +453,26 @@ export class LifecycleManager {
 
     const exists = await this.docker.exists(worker.containerId);
     return !exists;
+  }
+
+  private async requireWorker(sessionId: string): Promise<SessionWorker> {
+    const worker = await this.repo.findBySessionId(sessionId);
+    if (!worker || worker.state === "deleted") {
+      throw new SessionWorkerNotFoundError(sessionId);
+    }
+    return worker;
+  }
+
+  private async touchWorker(worker: SessionWorker): Promise<void> {
+    const now = new Date();
+    const touched = touchSessionWorker(
+      worker,
+      {
+        lastActiveAt: now,
+      },
+      now,
+    );
+    await this.repo.save(touched);
   }
 
   private async syncWorkspace(
@@ -394,5 +617,57 @@ const NOOP_EXECUTOR_CLIENT: ExecutorClient = {
   validateWorkspace: async () => ({
     ok: true,
     missingRequiredPaths: [],
+  }),
+  listWorkspaceTree: async ({ path }) => ({
+    path,
+    entries: [],
+  }),
+  readWorkspaceFile: async ({ path }) => ({
+    path,
+    fileName: path.split("/").at(-1) ?? "file",
+    contentType: "text/plain; charset=utf-8",
+    size: 0,
+    offset: 0,
+    limit: 0,
+    readBytes: 0,
+    nextOffset: null,
+    truncated: false,
+    encoding: "utf8",
+    content: "",
+  }),
+  writeWorkspaceFile: async ({ path, content }) => ({
+    path,
+    size: Buffer.byteLength(content, "utf8"),
+  }),
+  uploadWorkspaceFile: async ({ path, contentBase64 }) => ({
+    path,
+    size: Buffer.from(contentBase64, "base64").byteLength,
+  }),
+  renameWorkspacePath: async ({ path, newPath }) => ({
+    path,
+    newPath,
+  }),
+  deleteWorkspacePath: async ({ path }) => ({
+    path,
+    deleted: true,
+  }),
+  mkdirWorkspacePath: async ({ path }) => ({
+    path,
+  }),
+  downloadWorkspaceFile: async ({ path }) => ({
+    path,
+    fileName: path.split("/").at(-1) ?? "file",
+    contentType: "application/octet-stream",
+    content: Buffer.alloc(0),
+  }),
+  executeWorkspaceCommand: async ({ command }) => ({
+    command,
+    cwd: "/workspace",
+    exitCode: 0,
+    stdout: "",
+    stderr: "",
+    durationMs: 0,
+    timedOut: false,
+    truncated: false,
   }),
 };
