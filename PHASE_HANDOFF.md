@@ -889,3 +889,54 @@
 
 ### next_phase
 - Phase 17：补齐前端 E2E 与工作台剩余能力（history/files/store/stream-reconnect）。
+
+---
+
+## Phase 17: 前端 E2E 基线（Playwright）
+
+### objective
+- 为 ChatUI 主链路建立自动化前端回归能力，优先覆盖 run 流式消息、todo 面板、human-loop 回复闭环。
+
+### inputs
+- 已完成 Phase 16（`useChat` + 自定义 transport）。
+- 现状缺少前端自动化测试框架与用例。
+
+### actions
+- 在 `portal` 引入 Playwright 测试依赖与配置：
+  - 新增 `playwright.config.ts`
+  - 新增 npm scripts：`test` / `test:e2e` / `test:e2e:ui`
+- 新增 E2E 用例 `portal/e2e/tests/chat-workbench.spec.ts`：
+  - 用 route mock 模拟 `/api/runs/start` SSE 事件流。
+  - 覆盖“发送消息 -> assistant 流式回包 -> todo.update 面板渲染”路径。
+  - 覆盖“human-loop pending -> reply -> 列表清空 + timeline 更新”路径。
+- 安装 Chromium 浏览器运行时并执行测试验证。
+- 更新剩余研发文档状态：
+  - Phase 16 标记完成。
+  - Phase 17 标记进行中并挂载 E2E 基线任务。
+
+### outputs
+- `portal/playwright.config.ts`
+- `portal/e2e/tests/chat-workbench.spec.ts`
+- `portal/package.json`
+- `portal/package-lock.json`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `cd portal && npm run build`
+  - `cd portal && npm run test:e2e`
+  - `cd portal && npm run test`
+- results:
+  - Vite 构建通过。
+  - Playwright E2E 通过（2/2）。
+  - 统一测试脚本通过（2/2）。
+
+### gate_result
+- **Pass**（前端 E2E 基线已落地，关键交互可自动回归）
+
+### risks
+- 当前 E2E 使用 API route mock，尚未覆盖真实后端联调与断线重连行为。
+- 文件域/历史会话/应用商店能力仍无前端自动化覆盖。
+
+### next_phase
+- Phase 17 后续子阶段：接入历史会话与文件域，扩展真实联调型前端 E2E。
