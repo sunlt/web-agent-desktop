@@ -1,0 +1,158 @@
+# 剩余研发推进计划（Phase 8+）
+
+**基线状态**: Phase 1~7 已完成（控制面、生命周期、provider、持久化、真实依赖联调、trace/failure 注入 E2E）。
+**推进方式**: 严格按阶段串行推进；每阶段结束必须完成验证并提交 git。
+
+## 提交与门禁规则（强制）
+
+每个阶段必须按以下顺序结束：
+1. 代码实现与文档同步完成。
+2. 执行阶段验证命令（至少 `npm run build`、`npm test`，涉及真实环境时加 `npm run test:e2e:real`）。
+3. 仅提交该阶段相关改动（`git add <files>`）。
+4. 提交信息格式：`feat(phase-X): <阶段目标>` 或 `fix(phase-X): <问题>`。
+5. 在 `PHASE_HANDOFF.md` 追加该阶段 `actions/outputs/validation/gate_result/risks/next_phase`。
+
+---
+
+## Phase 8: 正式 Executor 对接硬化
+**Type**: Integration + Reliability
+**Estimated**: 4~6 小时
+**目标**: 从“fixture 可用”提升到“正式服务可接入”，补鉴权、重试、超时与错误分类。
+
+**范围文件**:
+- `control-plane/src/adapters/executor-http-client.ts`
+- `control-plane/src/server.ts`
+- `control-plane/src/app.ts`
+- `control-plane/test/e2e/real-environment-utils.ts`
+- `control-plane/test/e2e/real-infra.e2e.test.ts`
+
+**Tasks**:
+- [ ] 支持 executor token 鉴权（Bearer）与可配置超时。
+- [ ] 增加可配置重试（仅 5xx/网络超时可重试，4xx 快速失败）。
+- [ ] 明确错误分类（timeout/network/http_status）并落入错误信息。
+- [ ] 增加“瞬时失败后成功”的真实 E2E（验证重试生效）。
+
+**Verification Criteria**:
+- [ ] `npm run build` 通过。
+- [ ] `npm test` 通过。
+- [ ] `npm run test:e2e:real` 通过，包含 retry 成功用例。
+
+**Exit Criteria**:
+- control-plane 能在不改代码的情况下通过 ENV 对接正式 executor（鉴权+重试+超时策略可控）。
+
+---
+
+## Phase 9: Run Queue 执行循环（claim/lock/retry）
+**Type**: Backend + Database
+**Estimated**: 6~8 小时
+**目标**: 落地 `run_queue` 消费循环，支持并发 claim、锁续期、失败重试与幂等恢复。
+
+**范围文件**:
+- `control-plane/src/services/run-queue-manager.ts`（新增）
+- `control-plane/src/repositories/postgres-run-queue-repository.ts`（新增）
+- `control-plane/src/server.ts`
+- `control-plane/sql/00x_run_queue_*.sql`（新增）
+- `control-plane/test/e2e/run-queue.e2e.test.ts`（新增）
+
+**Tasks**:
+- [ ] 实现 `FOR UPDATE SKIP LOCKED` claim。
+- [ ] 支持 attempt 计数、retry_at、最大重试次数。
+- [ ] 支持 manager 崩溃恢复（过期锁回收）。
+- [ ] run 去重与幂等（相同 run_id 不重复执行）。
+
+**Verification Criteria**:
+- [ ] 并发 claim 下无重复消费。
+- [ ] 注入失败后按策略重试并可最终成功/失败封顶。
+- [ ] e2e 验证 manager 重启后可接续处理。
+
+**Exit Criteria**:
+- run 调度从手动触发升级为队列驱动，满足设计文档的 queue 能力基线。
+
+---
+
+## Phase 10: 流式执行协议升级（SSE/WS）
+**Type**: API + E2E
+**Estimated**: 6~8 小时
+**目标**: `/api/runs/start` 从聚合返回改为实时流，前后端可消费统一事件。
+
+**范围文件**:
+- `control-plane/src/routes/runs.ts`
+- `control-plane/src/services/run-orchestrator.ts`
+- `control-plane/src/services/stream-bus.ts`（新增）
+- `control-plane/test/e2e/runs-stream.e2e.test.ts`（新增）
+
+**Tasks**:
+- [ ] 提供 SSE（优先）或 WS 事件流接口。
+- [ ] 输出标准化事件：`message/tool/todo/human_loop/run`。
+- [ ] 支持断线重连后的事件回放游标。
+
+**Verification Criteria**:
+- [ ] 流式事件按顺序到达，结束态一致。
+- [ ] `message.stop`、`todo.update`、`run.finished` 在流上可观察。
+
+**Exit Criteria**:
+- 前端可实时消费 run 过程，无需轮询聚合结果。
+
+---
+
+## Phase 11: 可观测性与对账修复
+**Type**: Reliability + Ops
+**Estimated**: 4~6 小时
+**目标**: 建立最小可用的跨服务观测与自动修复能力。
+
+**范围文件**:
+- `control-plane/src/observability/logger.ts`（新增）
+- `control-plane/src/services/reconciler.ts`（新增）
+- `control-plane/src/server.ts`
+- `control-plane/test/e2e/reconcile.e2e.test.ts`（新增）
+
+**Tasks**:
+- [ ] 结构化日志统一字段（trace_id/session_id/run_id/executor_id）。
+- [ ] 超时 run 对账任务（query executor 状态，失败兜底落库）。
+- [ ] 过旧 sync 状态补偿任务（增量 sync）。
+
+**Verification Criteria**:
+- [ ] 注入 manager 中断后可自动修复 run 终态。
+- [ ] 异常路径可通过 trace 字段串联日志。
+
+**Exit Criteria**:
+- 关键异常具备自动修复或明确告警出口。
+
+---
+
+## Phase 12: M2 平台能力补齐（商店/权限/文件只读）
+**Type**: Product + API
+**Estimated**: 8~12 小时
+**目标**: 对齐设计文档 M2：应用商店可见/可用、project/user 配置、全局文件浏览只读下载。
+
+**范围文件**:
+- `control-plane/src/routes/apps.ts`（新增）
+- `control-plane/src/routes/files.ts`（新增）
+- `control-plane/src/repositories/rbac-*.ts`（新增）
+- `control-plane/sql/00x_rbac_*.sql`（新增）
+- `control-plane/test/e2e/apps-files-rbac.e2e.test.ts`（新增）
+
+**Tasks**:
+- [ ] 最小 RBAC（users/departments/roles/bindings）。
+- [ ] 应用商店可见/可用策略接口。
+- [ ] 文件树浏览与下载（只读）。
+
+**Verification Criteria**:
+- [ ] 未授权用户不可见/不可用目标 app。
+- [ ] 文件读取行为全链路审计可追溯。
+
+**Exit Criteria**:
+- 达成 M2 基础可运营门槛。
+
+---
+
+## 执行顺序
+1. Phase 8（正在开始）
+2. Phase 9
+3. Phase 10
+4. Phase 11
+5. Phase 12
+
+## 当前阶段
+- `in_progress`: Phase 8
+- `next_commit`: `feat(phase-8): harden executor integration with auth retry timeout`

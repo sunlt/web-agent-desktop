@@ -1,0 +1,4 @@
+interface:
+  display_name: "R&D Workflow Orchestrator"
+  short_description: "Plan and run staged project R&D with coordinated skills"
+  default_prompt: "Use $rd-workflow-orchestrator to execute this project from planning through E2E delivery."
