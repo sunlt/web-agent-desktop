@@ -191,6 +191,8 @@ services:
     volumes:
       - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
+    depends_on:
+      - gateway
     networks:
       - agent-network
     restart: always

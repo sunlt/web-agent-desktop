@@ -56,6 +56,14 @@ wait_for_health "executor-manager" "http://127.0.0.1:3010/health"
 wait_for_health "gateway" "http://127.0.0.1:3001/health"
 wait_for_health "control-plane-via-gateway" "http://127.0.0.1:3001/api/reconcile/metrics"
 
+log "probe gateway alertmanager webhook"
+webhook_probe_resp=$(curl -fsS \
+  -X POST \
+  -H 'content-type: application/json' \
+  -d '{"receiver":"phase18-smoke","status":"firing","alerts":[]}' \
+  "http://127.0.0.1:3001/alertmanager/webhook")
+assert_json "gateway alertmanager webhook accepted" "if(data.ok !== true){process.exit(1)}" "$webhook_probe_resp"
+
 session_id="sess-phase18-$(date +%s)"
 run_id="run-phase18-$(date +%s)"
 

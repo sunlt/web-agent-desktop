@@ -320,7 +320,7 @@
 - [x] 引入独立 observability 组件基础层：`prometheus`（compose）统一采集各服务健康与对账指标入口。
 - [x] 补齐 observability 深化能力：告警规则、日志聚合与可视化看板（Grafana/Loki/Alertmanager）。
 - [x] 增加 `gateway + executor-manager` 真实环境 E2E 脚本：`scripts/e2e-gateway-executor-manager.sh`（activate/cleanup/callback/sync 闭环）。
-- [ ] observability 通知渠道深化（企业告警接入：Webhook/IM/On-call 值班策略）与告警抑制策略精细化。
+- [x] observability 通知渠道深化（gateway webhook receiver + Alertmanager severity 路由 + critical 抑制 warning 规则）。
 
 **Verification Criteria**:
 - [x] `docker compose up -d --build` 后，`/api` 走 `gateway -> executor-manager/control-plane` 链路可用（已由 `scripts/e2e-gateway-executor-manager.sh` 验证）。
@@ -346,4 +346,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 18（网关/BFF 与部署边界拆分）
-- `next_commit`: `feat(phase-18): harden observability alert channels`
+- `next_commit`: `feat(phase-19): align advanced workspace interactions with design`

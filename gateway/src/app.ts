@@ -54,6 +54,41 @@ export function createGatewayApp(options: CreateGatewayAppOptions = {}): Express
     });
   });
 
+  app.post(
+    "/alertmanager/webhook",
+    express.json({ limit: "512kb" }),
+    (req, res) => {
+      const payload = req.body as {
+        readonly receiver?: string;
+        readonly status?: string;
+        readonly alerts?: Array<{
+          readonly status?: string;
+          readonly labels?: Record<string, string>;
+        }>;
+      };
+      const alerts = Array.isArray(payload?.alerts) ? payload.alerts : [];
+      const alertNames = alerts
+        .map((item) => item.labels?.alertname)
+        .filter((item): item is string => typeof item === "string")
+        .slice(0, 12);
+
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          ts: new Date().toISOString(),
+          component: "gateway",
+          message: "alertmanager webhook received",
+          receiver: payload?.receiver ?? "unknown",
+          status: payload?.status ?? "unknown",
+          alertCount: alerts.length,
+          alertNames,
+        }),
+      );
+
+      res.status(202).json({ ok: true });
+    },
+  );
+
   app.use(
     "/api/session-workers",
     createProxyHandler({

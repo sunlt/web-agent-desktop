@@ -2,11 +2,40 @@ global:
   resolve_timeout: 5m
 
 route:
-  receiver: default
+  receiver: gateway-webhook
   group_by: ["alertname", "job", "severity"]
-  group_wait: 30s
-  group_interval: 5m
-  repeat_interval: 2h
+  group_wait: 20s
+  group_interval: 2m
+  repeat_interval: 30m
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: gateway-webhook-critical
+      continue: false
+    - matchers:
+        - severity="warning"
+      receiver: gateway-webhook-warning
+      continue: false
+
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal:
+      - alertname
+      - job
 
 receivers:
-  - name: default
+  - name: gateway-webhook
+    webhook_configs:
+      - url: http://gateway:3001/alertmanager/webhook
+        send_resolved: true
+  - name: gateway-webhook-critical
+    webhook_configs:
+      - url: http://gateway:3001/alertmanager/webhook
+        send_resolved: true
+  - name: gateway-webhook-warning
+    webhook_configs:
+      - url: http://gateway:3001/alertmanager/webhook
+        send_resolved: true
