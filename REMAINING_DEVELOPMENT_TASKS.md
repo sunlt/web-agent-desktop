@@ -279,10 +279,10 @@
 - [x] 前端 E2E 基线：引入 Playwright 并落地首批用例（发送消息、流式回包、todo、human-loop 回复）。
 - [x] 历史会话：对接会话列表/加载/恢复（`chatId -> session_id` 映射）。
 - [x] 文件域：补齐上传/重命名/删除/在线编辑 + 审计闭环。
-- [ ] 文件预览增强：文本高亮与更细粒度分页渲染（基础文本编辑/图片-PDF 预览/分段读取已接入）。
+- [x] 文件预览增强：文本高亮 + 只读/编辑切换 + 更细粒度分页渲染（图片/PDF/二进制策略保持不变）。
 - [x] 应用商店接入：展示可见/可用应用并与会话入口联动。
-- [ ] Human-loop 体验完善（进行中）：已完成超时提示（不自动完成）与重复回复幂等反馈，待补 resolved 历史回看。
-- [ ] 前端流式稳定性：断线重连、游标恢复、异常态提示一致性。
+- [x] Human-loop 体验完善：超时提示（不自动完成）+ 重复回复幂等反馈 + resolved 历史回看已完成。
+- [x] 前端流式稳定性：断线重连、游标恢复、异常态提示一致性已完成。
 
 **Verification Criteria**:
 - [ ] 前端 E2E 覆盖核心路径并通过 CI。
@@ -307,4 +307,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 17（前端 E2E 基线 + 工作台剩余能力补齐）
-- `next_commit`: `feat(phase-17): improve human-loop timeout and idempotent reply UX`
+- `next_commit`: `feat(phase-17): add run-level reconcile alerts and metrics output`

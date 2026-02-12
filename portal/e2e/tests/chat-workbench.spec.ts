@@ -576,6 +576,10 @@ test.describe("Portal Chat Workbench", () => {
     await filesPanel.getByRole("button", { name: /readme.txt/i }).click();
 
     const preview = page.locator(".panel").filter({ hasText: "Preview" });
+    await expect(preview.locator(".code-lines")).toContainText("hello file");
+
+    await preview.getByRole("button", { name: "编辑" }).click();
+
     const editor = preview.locator(".file-editor");
     await expect(editor).toBeVisible();
     await expect(editor).toHaveValue("hello file");
@@ -590,5 +594,74 @@ test.describe("Portal Chat Workbench", () => {
       },
     ]);
     await expect(editor).toHaveValue("hello updated file");
+  });
+
+  test("Preview 文本模式支持分页查看", async ({ page }) => {
+    const runId = "run-e2e-file-page-1";
+    const now = "2026-02-12T15:10:00.000Z";
+    const longContent = Array.from(
+      { length: 220 },
+      (_, index) => `line-${String(index + 1).padStart(3, "0")}`,
+    ).join("\n");
+
+    const mockState: MockApiState = {
+      runId,
+      pendingRequests: [],
+      todoItems: [],
+      todoEvents: [],
+      replyPayloads: [],
+      historyChats: [
+        {
+          chatId: "chat-e2e-file-page-1",
+          sessionId: "chat-e2e-file-page-1",
+          title: "文件分页会话",
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          createdAt: now,
+          updatedAt: now,
+          lastMessageAt: null,
+        },
+      ],
+      historyMessages: {
+        "chat-e2e-file-page-1": [],
+      },
+      sseBody: "",
+      fileTreePath: "/workspace/public",
+      fileEntries: [
+        {
+          name: "huge.txt",
+          path: "/workspace/public/huge.txt",
+          isDirectory: false,
+          size: longContent.length,
+        },
+      ],
+      fileReadByPath: {
+        "/workspace/public/huge.txt": {
+          path: "/workspace/public/huge.txt",
+          content: longContent,
+          contentType: "text/plain; charset=utf-8",
+          encoding: "utf8",
+          size: longContent.length,
+          nextOffset: null,
+          truncated: false,
+        },
+      },
+      fileWrites: [],
+    };
+
+    await mockPortalApi(page, mockState);
+    await page.goto("/");
+
+    const filesPanel = page.locator(".panel").filter({ hasText: "Files" });
+    await filesPanel.getByRole("button", { name: "刷新" }).click();
+    await filesPanel.getByRole("button", { name: /huge.txt/i }).click();
+
+    const preview = page.locator(".panel").filter({ hasText: "Preview" });
+    await expect(preview.locator(".text-preview-paging")).toContainText("第 1 / 2 页");
+    await expect(preview.locator(".code-lines")).toContainText("line-001");
+
+    await preview.getByRole("button", { name: "下一页" }).click();
+    await expect(preview.locator(".text-preview-paging")).toContainText("第 2 / 2 页");
+    await expect(preview.locator(".code-lines")).toContainText("line-220");
   });
 });

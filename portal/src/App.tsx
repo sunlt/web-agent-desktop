@@ -1,5 +1,6 @@
 import type { ProviderKind } from "./workbench/transport";
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { TextFilePreview } from "./workbench/text-file-preview";
 import { useFileWorkspace } from "./workbench/use-file-workspace";
 import { useRunChat } from "./workbench/use-run-chat";
 import {
@@ -593,43 +594,17 @@ export default function App() {
                       : "-"}
                   </span>
                 </div>
-                {fileWorkspace.filePreviewMode === "text" ? (
-                  <>
-                    <textarea
-                      className="file-editor"
-                      value={fileWorkspace.fileDraft}
-                      onChange={(event) => fileWorkspace.setFileDraft(event.target.value)}
-                      rows={10}
-                      disabled={fileWorkspace.fileBusy}
-                    />
-                    <div className="preview-actions">
-                      <button
-                        type="button"
-                        disabled={
-                          fileWorkspace.fileBusy ||
-                          !fileWorkspace.activeFilePreview ||
-                          fileWorkspace.activeFilePreview.truncated ||
-                          fileWorkspace.activeFilePreview.encoding !== "utf8"
-                        }
-                        onClick={() => void fileWorkspace.saveActiveFile()}
-                      >
-                        保存
-                      </button>
-                      {fileWorkspace.activeFilePreview?.nextOffset !== null ? (
-                        <button
-                          type="button"
-                          className="secondary"
-                          disabled={fileWorkspace.fileBusy}
-                          onClick={() => void fileWorkspace.handleLoadMoreFile()}
-                        >
-                          继续加载
-                        </button>
-                      ) : null}
-                      {fileWorkspace.activeFilePreview?.truncated ? (
-                        <p className="muted">当前为分段读取，加载完整后才可保存。</p>
-                      ) : null}
-                    </div>
-                  </>
+                {fileWorkspace.filePreviewMode === "text" &&
+                fileWorkspace.activeFilePreview ? (
+                  <TextFilePreview
+                    path={fileWorkspace.activeFilePath}
+                    preview={fileWorkspace.activeFilePreview}
+                    draft={fileWorkspace.fileDraft}
+                    setDraft={fileWorkspace.setFileDraft}
+                    busy={fileWorkspace.fileBusy}
+                    onLoadMore={fileWorkspace.handleLoadMoreFile}
+                    onSave={fileWorkspace.saveActiveFile}
+                  />
                 ) : null}
                 {fileWorkspace.filePreviewMode === "image" && fileWorkspace.activeFileInlineUrl ? (
                   <img
