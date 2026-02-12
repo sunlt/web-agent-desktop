@@ -32,8 +32,13 @@ const dockerClient = useDockerCli
 const executorClient = executorBaseUrl
   ? new ExecutorHttpClient({
       baseUrl: executorBaseUrl,
-      timeoutMs: Number(process.env.EXECUTOR_TIMEOUT_MS ?? 30_000),
+      timeoutMs: parseNumber(process.env.EXECUTOR_TIMEOUT_MS, 30_000),
       token: process.env.EXECUTOR_AUTH_TOKEN,
+      maxRetries: parseNumber(process.env.EXECUTOR_MAX_RETRIES, 0),
+      retryDelayMs: parseNumber(process.env.EXECUTOR_RETRY_DELAY_MS, 200),
+      retryStatusCodes: parseStatusCodes(
+        process.env.EXECUTOR_RETRY_STATUS_CODES,
+      ),
     })
   : undefined;
 
@@ -66,4 +71,26 @@ function parseCommand(raw?: string): readonly string[] | undefined {
   }
 
   return undefined;
+}
+
+function parseNumber(raw: string | undefined, fallback: number): number {
+  if (!raw) {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return value;
+}
+
+function parseStatusCodes(raw?: string): readonly number[] | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const codes = raw
+    .split(",")
+    .map((part) => Number(part.trim()))
+    .filter((code) => Number.isInteger(code) && code >= 100 && code <= 599);
+  return codes.length > 0 ? codes : undefined;
 }

@@ -280,6 +280,7 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
       const executorClient = new ExecutorHttpClient({
         baseUrl: failingFixture.baseUrl,
         timeoutMs: 20_000,
+        maxRetries: 0,
       });
 
       const app = createControlPlaneApp({
@@ -358,6 +359,119 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
       ]);
     } finally {
       await failingFixture.stop();
+    }
+  }, 180_000);
+
+  test("should retry sync and stop worker when executor has transient failure", async () => {
+    if (!pool || !rustfs) {
+      throw new Error("real infra fixtures not initialized");
+    }
+
+    const flakyFixture = await startExecutorFixture({
+      rustfsEndpoint: rustfs.endpoint,
+      accessKey: rustfs.accessKey,
+      secretKey: rustfs.secretKey,
+      bucket: `${bucket}-retry`,
+      failureRules: {
+        "/workspace/sync": {
+          times: 1,
+          status: 500,
+          body: { error: "temporary_sync_failure" },
+        },
+      },
+    });
+
+    try {
+      const sessionId = `sess-real-retry-${Date.now()}`;
+      const sessionWorkerRepository = new PostgresSessionWorkerRepository(pool);
+      const callbackRepository = new PostgresRunCallbackRepository(pool);
+      const dockerClient = new DockerCliClient({
+        containerImage: "alpine:3.20",
+        containerCommand: ["sh", "-c", "sleep infinity"],
+      });
+      const executorClient = new ExecutorHttpClient({
+        baseUrl: flakyFixture.baseUrl,
+        timeoutMs: 20_000,
+        maxRetries: 1,
+        retryDelayMs: 5,
+      });
+
+      const app = createControlPlaneApp({
+        sessionWorkerRepository,
+        callbackRepository,
+        dockerClient,
+        workspaceSyncClient: executorClient,
+        executorClient,
+        providerAdapters: [],
+      });
+      let containerId = "";
+
+      await withHttpServer(app, async (baseUrl) => {
+        const activate = await fetch(
+          `${baseUrl}/api/session-workers/${sessionId}/activate`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              appId: "app-real",
+              projectName: "default",
+              userLoginName: "alice",
+            }),
+          },
+        );
+        expect(activate.status).toBe(200);
+        const activateBody = (await activate.json()) as {
+          worker: { containerId: string };
+        };
+        containerId = activateBody.worker.containerId;
+
+        await sleep(30);
+
+        const stopIdle = await fetch(
+          `${baseUrl}/api/session-workers/cleanup/idle`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              idleTimeoutMs: 1,
+              limit: 20,
+            }),
+          },
+        );
+        expect(stopIdle.status).toBe(200);
+        expect(await stopIdle.json()).toMatchObject({
+          total: 1,
+          succeeded: 1,
+          failed: 0,
+        });
+
+        const worker = await fetch(
+          `${baseUrl}/api/session-workers/${sessionId}`,
+        );
+        expect(worker.status).toBe(200);
+        const body = (await worker.json()) as {
+          state: string;
+          lastSyncStatus: string;
+        };
+        expect(body.state).toBe("stopped");
+        expect(body.lastSyncStatus).toBe("success");
+      });
+
+      const syncEvents = flakyFixture
+        .getEvents()
+        .filter((item) => item.path === "/workspace/sync");
+      expect(syncEvents.length).toBeGreaterThanOrEqual(2);
+      expect(syncEvents[0]?.operation).toMatch(/^workspace\.sync\./);
+
+      if (containerId) {
+        await dockerClient.remove(containerId, { force: true }).catch(() => {});
+      }
+
+      await pool.query(`DELETE FROM session_workers WHERE session_id = $1`, [
+        sessionId,
+      ]);
+    } finally {
+      await flakyFixture.stop();
     }
   }, 180_000);
 });

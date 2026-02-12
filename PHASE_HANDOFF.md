@@ -374,3 +374,60 @@
 
 ### next_phase
 - 对接正式 executor 服务并替换 fixture（鉴权、超时、重试策略对齐），补跨服务日志聚合与告警门限。
+
+---
+
+## Phase 8: 正式 Executor 对接硬化（当前迭代切片 H）
+
+### objective
+- 把 executor 接口从“可联调”提升到“可生产对接”：增加重试策略、错误分类、ENV 策略化配置与真实重试用例。
+
+### inputs
+- 已完成的 Phase 7 真实依赖联调能力
+- `设计.md` 中关于 stop/remove 前同步重试与告警可观测要求（第 5/10/24 章）
+
+### actions
+- `ExecutorHttpClient` 增加重试策略：
+  - 仅对 5xx（默认 `500/502/503/504`）与网络/超时错误重试
+  - 4xx 直接失败，不进入重试
+  - 线性退避（`retryDelayMs * attempt`）
+- 新增 `ExecutorRequestError`，统一错误分类：
+  - `http` / `timeout` / `network`
+  - 带 `path/attempt/maxAttempts/status` 等上下文字段
+- `server.ts` 增加重试策略 ENV 配置：
+  - `EXECUTOR_MAX_RETRIES`
+  - `EXECUTOR_RETRY_DELAY_MS`
+  - `EXECUTOR_RETRY_STATUS_CODES`
+- 新增单测 `executor-http-client.test.ts`：
+  - 鉴权头与 trace 头透传
+  - 500 瞬时失败自动重试成功
+  - 400 快速失败且不重试
+- 扩展真实 E2E：
+  - 保持“失败注入后失败”的用例（`maxRetries=0`）
+  - 新增“失败注入一次后重试成功”用例（`maxRetries=1`）
+
+### outputs
+- `control-plane/src/adapters/executor-http-client.ts`
+- `control-plane/src/server.ts`
+- `control-plane/test/executor-http-client.test.ts`
+- `control-plane/test/e2e/real-infra.e2e.test.ts`
+
+### validation
+- commands:
+  - `npm run build`
+  - `npm test`
+  - `npm run test:e2e:real`
+- results:
+  - TypeScript 构建通过
+  - Vitest 常规集通过（新增 executor client 单测）
+  - 真实依赖 E2E 通过（3 条用例，含 retry 成功路径）
+
+### gate_result
+- **Pass**（正式 executor 对接的可靠性硬化已完成）
+
+### risks
+- 当前仍使用 fixture 模拟 executor，尚未验证正式服务在鉴权失败、限流、慢响应场景下的真实行为。
+- 重试策略为客户端本地策略，尚未接入全局熔断/速率限制。
+
+### next_phase
+- Phase 9：落地 `run_queue` claim/lock/retry 执行循环（含崩溃恢复与幂等消费）。

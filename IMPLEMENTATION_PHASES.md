@@ -139,3 +139,23 @@
 
 **Exit Criteria**:
 - control-plane 具备切换到真实基础设施联调的能力
+
+## Phase 8: 正式 Executor 对接硬化
+**Type**: Integration + Reliability  
+**Estimated**: 4 小时  
+**Files**: `control-plane/src/adapters/executor-http-client.ts`, `control-plane/src/server.ts`, `control-plane/test/executor-http-client.test.ts`, `control-plane/test/e2e/real-infra.e2e.test.ts`
+
+**Tasks**:
+- [x] Executor HTTP 客户端支持可配置重试（仅 5xx/网络超时）
+- [x] 细化错误分类（http/timeout/network）并统一错误结构
+- [x] server 支持 ENV 配置重试参数（次数/退避/状态码）
+- [x] 增加单测覆盖鉴权 header 与重试策略
+- [x] 增加真实 E2E 覆盖“瞬时 500 后重试成功”
+
+**Verification Criteria**:
+- [x] `npm run build` 通过
+- [x] `npm test` 通过（新增 `executor-http-client` 单测）
+- [x] `RUN_REAL_E2E=1` 时真实环境 E2E 通过（含 retry 成功用例）
+
+**Exit Criteria**:
+- control-plane 具备接入正式 executor 所需的基础可靠性（鉴权、超时、重试、可观测错误）

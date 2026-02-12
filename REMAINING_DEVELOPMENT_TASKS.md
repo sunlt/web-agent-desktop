@@ -27,15 +27,15 @@
 - `control-plane/test/e2e/real-infra.e2e.test.ts`
 
 **Tasks**:
-- [ ] 支持 executor token 鉴权（Bearer）与可配置超时。
-- [ ] 增加可配置重试（仅 5xx/网络超时可重试，4xx 快速失败）。
-- [ ] 明确错误分类（timeout/network/http_status）并落入错误信息。
-- [ ] 增加“瞬时失败后成功”的真实 E2E（验证重试生效）。
+- [x] 支持 executor token 鉴权（Bearer）与可配置超时。
+- [x] 增加可配置重试（仅 5xx/网络超时可重试，4xx 快速失败）。
+- [x] 明确错误分类（timeout/network/http_status）并落入错误信息。
+- [x] 增加“瞬时失败后成功”的真实 E2E（验证重试生效）。
 
 **Verification Criteria**:
-- [ ] `npm run build` 通过。
-- [ ] `npm test` 通过。
-- [ ] `npm run test:e2e:real` 通过，包含 retry 成功用例。
+- [x] `npm run build` 通过。
+- [x] `npm test` 通过。
+- [x] `npm run test:e2e:real` 通过，包含 retry 成功用例。
 
 **Exit Criteria**:
 - control-plane 能在不改代码的情况下通过 ENV 对接正式 executor（鉴权+重试+超时策略可控）。
@@ -147,12 +147,12 @@
 ---
 
 ## 执行顺序
-1. Phase 8（正在开始）
-2. Phase 9
+1. Phase 8（已完成）
+2. Phase 9（正在开始）
 3. Phase 10
 4. Phase 11
 5. Phase 12
 
 ## 当前阶段
-- `in_progress`: Phase 8
-- `next_commit`: `feat(phase-8): harden executor integration with auth retry timeout`
+- `in_progress`: Phase 9
+- `next_commit`: `feat(phase-9): implement run queue claim lock retry loop`
