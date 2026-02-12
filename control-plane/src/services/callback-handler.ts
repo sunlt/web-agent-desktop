@@ -146,6 +146,12 @@ export interface HumanLoopRepository {
     readonly limit?: number;
   }): Promise<readonly HumanLoopRequestRecord[]>;
 
+  listRequests(input: {
+    readonly runId?: string;
+    readonly limit?: number;
+    readonly status?: HumanLoopRequestStatus;
+  }): Promise<readonly HumanLoopRequestRecord[]>;
+
   findRequest(questionId: string): Promise<HumanLoopRequestRecord | null>;
 
   saveResponse(input: {

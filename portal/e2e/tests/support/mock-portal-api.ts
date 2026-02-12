@@ -77,6 +77,7 @@ export type StoreApp = {
 export type MockApiState = {
   runId: string;
   pendingRequests: PendingRequest[];
+  resolvedRequests?: PendingRequest[];
   todoItems: TodoItem[];
   todoEvents: TodoEvent[];
   replyPayloads: Array<{ runId: string; questionId: string; answer: string }>;
@@ -89,6 +90,8 @@ export type MockApiState = {
   fileWrites?: Array<{ path: string; content: string }>;
   storeApps?: StoreApp[];
   runStartPayloads?: Array<Record<string, unknown>>;
+  streamReconnectBody?: string;
+  streamReconnectCalls?: number;
   replyResultByQuestion?: Record<
     string,
     {
@@ -105,7 +108,9 @@ export async function mockPortalApi(page: Page, state: MockApiState): Promise<vo
   state.fileWrites ??= [];
   state.storeApps ??= [];
   state.runStartPayloads ??= [];
+  state.streamReconnectCalls ??= 0;
   state.replyResultByQuestion ??= {};
+  state.resolvedRequests ??= [];
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -450,6 +455,18 @@ export async function mockPortalApi(page: Page, state: MockApiState): Promise<vo
       });
     }
 
+    if (path === `/api/runs/${state.runId}/stream` && method === "GET") {
+      state.streamReconnectCalls += 1;
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache",
+        },
+        body: state.streamReconnectBody ?? state.sseBody,
+      });
+    }
+
     if (path === `/api/runs/${state.runId}/todos` && method === "GET") {
       return route.fulfill({
         status: 200,
@@ -476,6 +493,18 @@ export async function mockPortalApi(page: Page, state: MockApiState): Promise<vo
       });
     }
 
+    if (path === "/api/human-loop/requests" && method === "GET") {
+      const runId = url.searchParams.get("runId");
+      const status = url.searchParams.get("status");
+      const requests =
+        runId === state.runId && status === "resolved" ? state.resolvedRequests : [];
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ requests }),
+      });
+    }
+
     if (path === "/api/human-loop/reply" && method === "POST") {
       const raw = request.postData() ?? "{}";
       const payload = JSON.parse(raw) as {
@@ -486,9 +515,23 @@ export async function mockPortalApi(page: Page, state: MockApiState): Promise<vo
       const replyPreset = state.replyResultByQuestion[payload.questionId] ?? null;
       state.replyPayloads.push(payload);
       if (!replyPreset?.duplicate) {
+        const resolvedAt = new Date().toISOString();
+        const resolvedItem = state.pendingRequests.find(
+          (requestItem) => requestItem.questionId === payload.questionId,
+        );
         state.pendingRequests = state.pendingRequests.filter(
           (requestItem) => requestItem.questionId !== payload.questionId,
         );
+        if (resolvedItem) {
+          state.resolvedRequests = [
+            {
+              ...resolvedItem,
+              status: "resolved",
+              resolvedAt,
+            },
+            ...(state.resolvedRequests ?? []),
+          ];
+        }
       }
 
       return route.fulfill({

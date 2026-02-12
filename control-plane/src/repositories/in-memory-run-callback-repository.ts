@@ -230,15 +230,25 @@ export class InMemoryRunCallbackRepository
     runId?: string;
     limit?: number;
   }): Promise<readonly HumanLoopRequestRecord[]> {
-    const pending = Array.from(this.humanLoopRequests.values())
-      .filter((item) => item.status === "pending")
-      .filter((item) => (input.runId ? item.runId === input.runId : true))
-      .sort(
-        (a, b) => b.requestedAt.getTime() - a.requestedAt.getTime(),
-      );
+    return this.listRequests({
+      runId: input.runId,
+      limit: input.limit,
+      status: "pending",
+    });
+  }
 
-    const limit = input.limit ?? pending.length;
-    return pending.slice(0, limit);
+  async listRequests(input: {
+    runId?: string;
+    limit?: number;
+    status?: HumanLoopRequestStatus;
+  }): Promise<readonly HumanLoopRequestRecord[]> {
+    const requests = Array.from(this.humanLoopRequests.values())
+      .filter((item) => (input.status ? item.status === input.status : true))
+      .filter((item) => (input.runId ? item.runId === input.runId : true))
+      .sort((a, b) => b.requestedAt.getTime() - a.requestedAt.getTime());
+
+    const limit = input.limit ?? requests.length;
+    return requests.slice(0, limit);
   }
 
   async findRequest(questionId: string): Promise<HumanLoopRequestRecord | null> {

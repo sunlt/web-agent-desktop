@@ -493,6 +493,42 @@ button.secondary {
   color: var(--primary-strong);
 }
 
+.resolved-list-wrap {
+  margin-top: 12px;
+}
+
+.resolved-list-wrap h4 {
+  margin-bottom: 8px;
+}
+
+.resolved-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.resolved-list li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px;
+  display: grid;
+  gap: 4px;
+}
+
+.resolved-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resolved-list p {
+  margin: 0;
+  font-size: 12px;
+}
+
 .store-controls {
   display: flex;
   justify-content: flex-end;

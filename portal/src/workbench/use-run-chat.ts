@@ -1,15 +1,24 @@
 import { useChat } from "@ai-sdk/react";
-import type { UIMessage } from "ai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createControlPlaneTransport,
-  type PortalMessageMetadata,
   type ProviderKind,
   type RunStartConfig,
+  type StreamLifecycleEvent,
   type RunStatusEvent,
   type RunWarningEvent,
   type TodoUpdateEvent,
 } from "./transport";
+import {
+  type HistoryStatus,
+  type HumanLoopRequest,
+  type PortalUiMessage,
+  type StreamConnection,
+  type TodoEvent,
+  type TodoItem,
+  type TodoStatus,
+  type TimelineEntry,
+} from "./run-chat-types";
 import {
   resolveResponseError,
   sortHistorySummaries,
@@ -22,7 +31,6 @@ import {
 const POLL_MS = 3500;
 const MAX_TIMELINE = 200;
 
-type TodoStatus = "todo" | "doing" | "done" | "canceled";
 type UiRunStatus =
   | "idle"
   | "running"
@@ -30,46 +38,6 @@ type UiRunStatus =
   | "failed"
   | "blocked"
   | "canceled";
-
-export type PortalUiMessage = UIMessage<PortalMessageMetadata>;
-
-export interface TodoItem {
-  readonly runId: string;
-  readonly todoId: string;
-  readonly content: string;
-  readonly status: TodoStatus;
-  readonly order: number;
-  readonly updatedAt: string;
-}
-
-export interface TodoEvent {
-  readonly eventId: string;
-  readonly runId: string;
-  readonly todoId: string;
-  readonly content: string;
-  readonly status: TodoStatus;
-  readonly order: number;
-  readonly eventTs: string;
-}
-
-export interface HumanLoopRequest {
-  readonly questionId: string;
-  readonly runId: string;
-  readonly sessionId: string;
-  readonly prompt: string;
-  readonly metadata: Record<string, unknown>;
-  readonly status: "pending" | "resolved";
-  readonly requestedAt: string;
-  readonly resolvedAt: string | null;
-}
-
-export interface TimelineEntry {
-  readonly id: string;
-  readonly ts: string;
-  readonly label: string;
-}
-
-type HistoryStatus = "idle" | "loading" | "error";
 
 interface ActiveStoreApp {
   readonly appId: string;
@@ -91,6 +59,7 @@ export interface RunChatController {
   readonly groupedTodos: Record<TodoStatus, TodoItem[]>;
   readonly todoEvents: TodoEvent[];
   readonly pendingRequests: HumanLoopRequest[];
+  readonly resolvedRequests: HumanLoopRequest[];
   readonly answerDrafts: Record<string, string>;
   readonly setAnswerDrafts: (
     updater: (prev: Record<string, string>) => Record<string, string>,
@@ -99,6 +68,7 @@ export interface RunChatController {
   readonly replyFeedback: Record<string, string>;
   readonly timeline: TimelineEntry[];
   readonly errorText: string;
+  readonly streamConnection: StreamConnection;
   readonly nowTick: number;
   readonly submitting: boolean;
   readonly appendTimeline: (label: string, ts?: string) => void;
@@ -130,11 +100,18 @@ export function useRunChat(input: {
   const [todoItems, setTodoItems] = useState<TodoItem[]>([]);
   const [todoEvents, setTodoEvents] = useState<TodoEvent[]>([]);
   const [pendingRequests, setPendingRequests] = useState<HumanLoopRequest[]>([]);
+  const [resolvedRequests, setResolvedRequests] = useState<HumanLoopRequest[]>([]);
   const [answerDrafts, setAnswerDraftsRaw] = useState<Record<string, string>>({});
   const [replying, setReplying] = useState<Record<string, boolean>>({});
   const [replyFeedback, setReplyFeedback] = useState<Record<string, string>>({});
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [errorText, setErrorText] = useState<string>("");
+  const [streamConnection, setStreamConnection] = useState<StreamConnection>({
+    state: "idle",
+    attempt: 0,
+    cursor: 0,
+    reason: "",
+  });
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
 
   const activeRunIdRef = useRef<string | null>(null);
@@ -248,7 +225,7 @@ export function useRunChat(input: {
 
   const refreshRunPanels = useCallback(
     async (runId: string) => {
-      const [todos, todoHistory, pending] = await Promise.all([
+      const [todos, todoHistory, pending, resolved] = await Promise.all([
         fetchJson<{ items: TodoItem[] }>(
           `/runs/${encodeURIComponent(runId)}/todos?limit=500`,
         ),
@@ -258,11 +235,21 @@ export function useRunChat(input: {
         fetchJson<{ requests: HumanLoopRequest[] }>(
           `/human-loop/pending?runId=${encodeURIComponent(runId)}&limit=200`,
         ),
+        fetchJson<{ requests: HumanLoopRequest[] }>(
+          `/human-loop/requests?runId=${encodeURIComponent(runId)}&status=resolved&limit=200`,
+        ),
       ]);
 
       setTodoItems(todos.items ?? []);
       setTodoEvents(todoHistory.events ?? []);
       setPendingRequests(pending.requests ?? []);
+      setResolvedRequests(
+        [...(resolved.requests ?? [])].sort((a, b) => {
+          const aTs = new Date(a.resolvedAt ?? a.requestedAt).getTime();
+          const bTs = new Date(b.resolvedAt ?? b.requestedAt).getTime();
+          return bTs - aTs;
+        }),
+      );
     },
     [fetchJson],
   );
@@ -278,6 +265,12 @@ export function useRunChat(input: {
 
       if (statusEvent.status === "started") {
         setRunStatus("running");
+        setStreamConnection({
+          state: "connected",
+          attempt: 0,
+          cursor: 0,
+          reason: "",
+        });
         return;
       }
       if (statusEvent.status === "blocked") {
@@ -357,6 +350,46 @@ export function useRunChat(input: {
     [appendTimeline],
   );
 
+  const handleStreamLifecycle = useCallback(
+    (event: StreamLifecycleEvent) => {
+      if (event.kind === "reconnecting") {
+        setStreamConnection({
+          state: "reconnecting",
+          attempt: event.attempt,
+          cursor: event.cursor,
+          reason: event.reason ?? "",
+        });
+        setRunDetail(`流式连接中断，正在重连（第 ${event.attempt} 次）`);
+        appendTimeline(
+          `stream.reconnecting #${event.attempt} (cursor=${event.cursor})`,
+        );
+        return;
+      }
+
+      if (event.kind === "reconnected") {
+        setStreamConnection({
+          state: "connected",
+          attempt: event.attempt,
+          cursor: event.cursor,
+          reason: "",
+        });
+        setRunDetail("");
+        appendTimeline(`stream.reconnected #${event.attempt}`);
+        return;
+      }
+
+      setStreamConnection({
+        state: "recover_failed",
+        attempt: event.attempt,
+        cursor: event.cursor,
+        reason: event.reason ?? "重连失败",
+      });
+      setRunDetail("流式连接中断且重连失败");
+      appendTimeline(`stream.reconnect_failed: ${event.reason ?? "unknown"}`);
+    },
+    [appendTimeline],
+  );
+
   const transport = useMemo(
     () =>
       createControlPlaneTransport({
@@ -368,10 +401,12 @@ export function useRunChat(input: {
         onRunClosed: () => {
           appendTimeline("run.closed");
         },
+        onStreamLifecycle: handleStreamLifecycle,
       }),
     [
       apiBase,
       appendTimeline,
+      handleStreamLifecycle,
       handleRunStatusEvent,
       handleRunWarningEvent,
       handleTodoUpdateEvent,
@@ -391,6 +426,11 @@ export function useRunChat(input: {
       setErrorText(error.message);
       setRunDetail(error.message);
       setRunStatus("failed");
+      setStreamConnection((prev) => ({
+        ...prev,
+        state: "recover_failed",
+        reason: error.message,
+      }));
       appendTimeline(`run.error: ${error.message}`);
     },
     onFinish: (event) => {
@@ -465,7 +505,14 @@ export function useRunChat(input: {
     setTodoItems([]);
     setTodoEvents([]);
     setPendingRequests([]);
+    setResolvedRequests([]);
     setTimeline([]);
+    setStreamConnection({
+      state: "idle",
+      attempt: 0,
+      cursor: 0,
+      reason: "",
+    });
     clearError();
   }, [clearError]);
 
@@ -628,7 +675,14 @@ export function useRunChat(input: {
     setTodoItems([]);
     setTodoEvents([]);
     setPendingRequests([]);
+    setResolvedRequests([]);
     setTimeline([]);
+    setStreamConnection({
+      state: "connected",
+      attempt: 0,
+      cursor: 0,
+      reason: "",
+    });
     clearError();
     appendTimeline(
       `run.start (${provider}${activeStoreApp ? ` / app:${activeStoreApp.appId}` : ""})`,
@@ -688,6 +742,12 @@ export function useRunChat(input: {
       appendTimeline(`run.stop failed: ${message}`);
     } finally {
       await stop();
+      setStreamConnection({
+        state: "idle",
+        attempt: 0,
+        cursor: 0,
+        reason: "",
+      });
     }
   }, [activeRunId, appendTimeline, fetchJson, runStatus, stop]);
 
@@ -781,12 +841,14 @@ export function useRunChat(input: {
     groupedTodos,
     todoEvents,
     pendingRequests,
+    resolvedRequests,
     answerDrafts,
     setAnswerDrafts,
     replying,
     replyFeedback,
     timeline,
     errorText,
+    streamConnection,
     nowTick,
     submitting,
     appendTimeline,

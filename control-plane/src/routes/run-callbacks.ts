@@ -60,6 +60,12 @@ const listPendingSchema = z.object({
   limit: z.coerce.number().int().positive().max(200).optional(),
 });
 
+const listHumanLoopRequestsSchema = z.object({
+  runId: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(200).optional(),
+  status: z.enum(["pending", "resolved", "canceled", "expired"]).optional(),
+});
+
 const replySchema = z.object({
   runId: z.string().min(1),
   questionId: z.string().min(1),
@@ -149,6 +155,24 @@ export function createRunCallbacksRouter(input: {
     const requests = await input.callbackRepo.listPendingRequests({
       runId: parsed.data.runId,
       limit: parsed.data.limit,
+    });
+
+    return res.json({
+      total: requests.length,
+      requests,
+    });
+  });
+
+  router.get("/human-loop/requests", async (req, res) => {
+    const parsed = listHumanLoopRequestsSchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
+    const requests = await input.callbackRepo.listRequests({
+      runId: parsed.data.runId,
+      limit: parsed.data.limit,
+      status: parsed.data.status,
     });
 
     return res.json({

@@ -284,6 +284,13 @@ export default function App() {
               <dd>{activeStoreApp ? `${activeStoreApp.name} (${activeStoreApp.appId})` : "-"}</dd>
               <dt>status</dt>
               <dd>{runChat.runStatus}</dd>
+              <dt>stream</dt>
+              <dd>
+                {runChat.streamConnection.state}
+                {runChat.streamConnection.state === "reconnecting"
+                  ? ` (#${runChat.streamConnection.attempt})`
+                  : ""}
+              </dd>
               <dt>detail</dt>
               <dd>{runChat.runDetail || "-"}</dd>
             </dl>
@@ -431,6 +438,24 @@ export default function App() {
                 })}
               </div>
             )}
+            <div className="resolved-list-wrap">
+              <h4>Resolved 历史</h4>
+              {runChat.resolvedRequests.length === 0 ? (
+                <p className="muted">暂无已处理问题</p>
+              ) : (
+                <ul className="resolved-list">
+                  {runChat.resolvedRequests.slice(0, 20).map((request) => (
+                    <li key={`${request.runId}-${request.questionId}`}>
+                      <div className="resolved-head">
+                        <strong>{request.questionId}</strong>
+                        <time>{formatTime(request.resolvedAt ?? request.requestedAt)}</time>
+                      </div>
+                      <p>{request.prompt}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </section>
 
           <section className="panel">

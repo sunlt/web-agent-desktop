@@ -131,6 +131,96 @@ test.describe("Portal Chat Workbench", () => {
     await expect(page.locator(".todo-events")).toContainText("[done] #1 实现前端 E2E");
   });
 
+  test("流式中断后可自动重连并恢复输出", async ({ page }) => {
+    const runId = "run-e2e-reconnect-1";
+    const now = "2026-02-12T14:35:00.000Z";
+
+    const mockState: MockApiState = {
+      runId,
+      pendingRequests: [],
+      resolvedRequests: [],
+      todoItems: [],
+      todoEvents: [],
+      replyPayloads: [],
+      historyChats: [
+        {
+          chatId: "chat-e2e-reconnect-1",
+          sessionId: "chat-e2e-reconnect-1",
+          title: "重连会话",
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          createdAt: now,
+          updatedAt: now,
+          lastMessageAt: null,
+        },
+      ],
+      historyMessages: {
+        "chat-e2e-reconnect-1": [],
+      },
+      sseBody: buildSseBody([
+        {
+          event: "run.status",
+          data: {
+            type: "run.status",
+            runId,
+            provider: "codex-cli",
+            status: "started",
+            ts: now,
+          },
+        },
+        {
+          event: "message.delta",
+          data: {
+            type: "message.delta",
+            runId,
+            provider: "codex-cli",
+            text: "你好，",
+            ts: now,
+          },
+        },
+      ]),
+      streamReconnectBody: buildSseBody([
+        {
+          event: "message.delta",
+          data: {
+            type: "message.delta",
+            runId,
+            provider: "codex-cli",
+            text: "世界",
+            ts: now,
+          },
+        },
+        {
+          event: "run.status",
+          data: {
+            type: "run.status",
+            runId,
+            provider: "codex-cli",
+            status: "finished",
+            detail: "succeeded",
+            ts: now,
+          },
+        },
+        {
+          event: "run.closed",
+          data: { runId },
+        },
+      ]),
+    };
+
+    await mockPortalApi(page, mockState);
+    await page.goto("/");
+
+    await page.getByPlaceholder("输入消息，Enter 发送，Shift+Enter 换行").fill("测试重连");
+    await page.getByRole("button", { name: "发送" }).click();
+
+    await expect(page.locator(".bubble-assistant pre").last()).toContainText("你好，世界");
+    await expect(page.locator(".timeline-list")).toContainText("stream.reconnecting");
+    await expect(page.locator(".timeline-list")).toContainText("stream.reconnected");
+    await expect(page.locator(".run-chip")).toContainText("succeeded");
+    expect(mockState.streamReconnectCalls).toBeGreaterThan(0);
+  });
+
   test("应用商店选择可联动 runs/start 参数", async ({ page }) => {
     const runId = "run-e2e-store-1";
     const now = "2026-02-12T14:40:00.000Z";
@@ -322,6 +412,8 @@ test.describe("Portal Chat Workbench", () => {
     await pendingCard.getByRole("button", { name: "提交回复" }).click();
 
     await expect(page.getByText("当前无待回复问题")).toBeVisible();
+    await expect(page.locator(".resolved-list")).toContainText("q-1");
+    await expect(page.locator(".resolved-list")).toContainText("请选择部署环境");
     await expect(page.locator(".timeline-list")).toContainText("human-loop resolved: q-1");
 
     expect(mockState.replyPayloads).toEqual([

@@ -240,6 +240,21 @@ describe("Human Loop E2E", () => {
       };
       expect(pendingAfterReplyBody.total).toBe(0);
 
+      const resolved = await fetch(
+        `${baseUrl}/api/human-loop/requests?runId=${runId}&status=resolved`,
+      );
+      expect(resolved.status).toBe(200);
+      const resolvedBody = (await resolved.json()) as {
+        total: number;
+        requests: Array<{ questionId: string; status: string; resolvedAt: string | null }>;
+      };
+      expect(resolvedBody.total).toBe(1);
+      expect(resolvedBody.requests[0]).toMatchObject({
+        questionId: "q-human-loop-1",
+        status: "resolved",
+      });
+      expect(resolvedBody.requests[0]?.resolvedAt).not.toBeNull();
+
       const startResponse = await startPromise;
       expect(startResponse.status).toBe(200);
       const startBody = (await startResponse.json()) as {

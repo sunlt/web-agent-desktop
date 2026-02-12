@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import type {
+  HumanLoopRequestStatus,
   HumanLoopRequestRecord,
   RunStatus,
   TodoStatus,
@@ -335,8 +336,25 @@ export class PostgresRunCallbackRepository
     runId?: string;
     limit?: number;
   }): Promise<readonly HumanLoopRequestRecord[]> {
-    const clauses = [`status = 'pending'`];
+    return this.listRequests({
+      runId: input.runId,
+      limit: input.limit,
+      status: "pending",
+    });
+  }
+
+  async listRequests(input: {
+    runId?: string;
+    limit?: number;
+    status?: HumanLoopRequestStatus;
+  }): Promise<readonly HumanLoopRequestRecord[]> {
+    const clauses = [`1 = 1`];
     const values: unknown[] = [];
+
+    if (input.status) {
+      values.push(input.status);
+      clauses.push(`status = $${values.length}`);
+    }
 
     if (input.runId) {
       values.push(input.runId);
