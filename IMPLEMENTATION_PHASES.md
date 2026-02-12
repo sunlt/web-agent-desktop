@@ -159,3 +159,23 @@
 
 **Exit Criteria**:
 - control-plane 具备接入正式 executor 所需的基础可靠性（鉴权、超时、重试、可观测错误）
+
+## Phase 9: Run Queue 执行循环（claim/lock/retry）
+**Type**: Backend + Database  
+**Estimated**: 5 小时  
+**Files**: `control-plane/src/repositories/run-queue-repository.ts`, `control-plane/src/repositories/postgres-run-queue-repository.ts`, `control-plane/src/services/run-queue-manager.ts`, `control-plane/src/routes/run-queue.ts`, `control-plane/test/e2e/run-queue.e2e.test.ts`
+
+**Tasks**:
+- [x] 落地 `run_queue` 仓储抽象（内存 + Postgres）
+- [x] 实现 claim 逻辑（`FOR UPDATE SKIP LOCKED` + 锁过期重领）
+- [x] 实现 attempt/retry/final-fail 状态流转
+- [x] 新增队列 API（enqueue/drain/query）
+- [x] 增加单测与 E2E 覆盖 retry 与锁恢复
+
+**Verification Criteria**:
+- [x] `npm run build` 通过
+- [x] `npm test` 通过（新增 run-queue 单测与 E2E）
+- [x] `RUN_REAL_E2E=1` 时真实依赖用例仍通过（无回归）
+
+**Exit Criteria**:
+- run 调度具备队列驱动基础能力，支持幂等入队、claim、重试与失败封顶

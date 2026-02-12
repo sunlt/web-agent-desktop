@@ -431,3 +431,68 @@
 
 ### next_phase
 - Phase 9：落地 `run_queue` claim/lock/retry 执行循环（含崩溃恢复与幂等消费）。
+
+---
+
+## Phase 9: Run Queue 执行循环（当前迭代切片 I）
+
+### objective
+- 落地 queue 驱动执行基线：run 入队、claim、执行、重试、失败封顶与状态查询。
+
+### inputs
+- 已完成的运行编排 `RunOrchestrator`
+- 已存在的 `run_queue` 表结构（`sql/001_init.sql`）
+
+### actions
+- 新增队列仓储接口与类型：
+  - `RunQueueRepository` / `RunQueueItem` / `RunQueuePayload`
+- 实现 `InMemoryRunQueueRepository`：
+  - 支持幂等入队、claim、重试回队、失败封顶
+  - 支持 `claimed + lock_expires_at` 过期后重新 claim（崩溃恢复）
+- 实现 `PostgresRunQueueRepository`：
+  - claim 使用 `FOR UPDATE SKIP LOCKED`
+  - 支持 `queued/claimed` 可领取条件与锁续占
+  - 支持 `attempts/max_attempts` 下的 retry/fail 切换
+- 新增 `RunQueueManager`：
+  - `enqueueRun()` 入队
+  - `drainOnce()` 批量 claim 并串行执行
+  - 处理 `succeeded/retried/failed/canceled` 统计
+- 新增队列 API：
+  - `POST /api/runs/queue/enqueue`
+  - `POST /api/runs/queue/drain`
+  - `GET /api/runs/queue/:runId`
+- `app.ts/server.ts` 完成组装：
+  - 默认内存队列仓储
+  - Postgres 模式下自动切换 `PostgresRunQueueRepository`
+  - 支持队列参数 ENV：`RUN_QUEUE_OWNER/LOCK_MS/RETRY_DELAY_MS`
+
+### outputs
+- `control-plane/src/repositories/run-queue-repository.ts`
+- `control-plane/src/repositories/in-memory-run-queue-repository.ts`
+- `control-plane/src/repositories/postgres-run-queue-repository.ts`
+- `control-plane/src/services/run-queue-manager.ts`
+- `control-plane/src/routes/run-queue.ts`
+- `control-plane/src/app.ts`
+- `control-plane/src/server.ts`
+- `control-plane/test/run-queue-manager.test.ts`
+- `control-plane/test/e2e/run-queue.e2e.test.ts`
+
+### validation
+- commands:
+  - `npm run build`
+  - `npm test`
+  - `npm run test:e2e:real`
+- results:
+  - TypeScript 构建通过
+  - Vitest 常规集通过（新增 queue 单测与 E2E）
+  - 真实依赖 E2E 通过（现有联调链路无回归）
+
+### gate_result
+- **Pass**（run_queue 执行循环基础能力已可用）
+
+### risks
+- 当前 `drainOnce` 为手动触发模式，尚未接入常驻 worker 循环与并发 worker 竞争测试。
+- queue 执行结果当前仅更新 `run_queue`，尚未把 `agent_runs/run_events` 做深度联动聚合。
+
+### next_phase
+- Phase 10：升级 `/api/runs/start` 为 SSE 实时流（含断线重连游标与历史回放）。

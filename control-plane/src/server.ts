@@ -3,6 +3,7 @@ import { DockerCliClient } from "./adapters/docker-cli-client.js";
 import { ExecutorHttpClient } from "./adapters/executor-http-client.js";
 import { createPostgresPool } from "./adapters/postgres-pool.js";
 import { PostgresRunCallbackRepository } from "./repositories/postgres-run-callback-repository.js";
+import { PostgresRunQueueRepository } from "./repositories/postgres-run-queue-repository.js";
 import { PostgresSessionWorkerRepository } from "./repositories/postgres-session-worker-repository.js";
 
 const usePostgres = process.env.CONTROL_PLANE_STORAGE === "postgres";
@@ -16,6 +17,9 @@ const sessionWorkerRepository = pool
   : undefined;
 const callbackRepository = pool
   ? new PostgresRunCallbackRepository(pool)
+  : undefined;
+const runQueueRepository = pool
+  ? new PostgresRunQueueRepository(pool)
   : undefined;
 
 const dockerClient = useDockerCli
@@ -48,6 +52,12 @@ const app = createControlPlaneApp({
   dockerClient,
   workspaceSyncClient: executorClient,
   executorClient,
+  runQueueRepository,
+  runQueueManagerOptions: {
+    owner: process.env.RUN_QUEUE_OWNER,
+    lockMs: parseNumber(process.env.RUN_QUEUE_LOCK_MS, 15_000),
+    retryDelayMs: parseNumber(process.env.RUN_QUEUE_RETRY_DELAY_MS, 1_000),
+  },
 });
 
 const port = Number(process.env.PORT ?? 3000);

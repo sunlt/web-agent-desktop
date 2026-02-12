@@ -55,15 +55,15 @@
 - `control-plane/test/e2e/run-queue.e2e.test.ts`（新增）
 
 **Tasks**:
-- [ ] 实现 `FOR UPDATE SKIP LOCKED` claim。
-- [ ] 支持 attempt 计数、retry_at、最大重试次数。
-- [ ] 支持 manager 崩溃恢复（过期锁回收）。
-- [ ] run 去重与幂等（相同 run_id 不重复执行）。
+- [x] 实现 `FOR UPDATE SKIP LOCKED` claim。
+- [x] 支持 attempt 计数、retry_at、最大重试次数。
+- [x] 支持 manager 崩溃恢复（过期锁回收）。
+- [x] run 去重与幂等（相同 run_id 不重复执行）。
 
 **Verification Criteria**:
-- [ ] 并发 claim 下无重复消费。
-- [ ] 注入失败后按策略重试并可最终成功/失败封顶。
-- [ ] e2e 验证 manager 重启后可接续处理。
+- [x] 并发 claim 下无重复消费。
+- [x] 注入失败后按策略重试并可最终成功/失败封顶。
+- [x] e2e 验证 manager 重启后可接续处理。
 
 **Exit Criteria**:
 - run 调度从手动触发升级为队列驱动，满足设计文档的 queue 能力基线。
@@ -148,11 +148,11 @@
 
 ## 执行顺序
 1. Phase 8（已完成）
-2. Phase 9（正在开始）
+2. Phase 9（已完成）
 3. Phase 10
 4. Phase 11
 5. Phase 12
 
 ## 当前阶段
-- `in_progress`: Phase 9
-- `next_commit`: `feat(phase-9): implement run queue claim lock retry loop`
+- `in_progress`: Phase 10
+- `next_commit`: `feat(phase-10): add runs sse streaming endpoint`

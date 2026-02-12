@@ -11,15 +11,20 @@ import type { DockerClient } from "./ports/docker-client.js";
 import type { ExecutorClient } from "./ports/executor-client.js";
 import type { WorkspaceSyncClient } from "./ports/workspace-sync-client.js";
 import { InMemoryRunCallbackRepository } from "./repositories/in-memory-run-callback-repository.js";
+import { InMemoryRunQueueRepository } from "./repositories/in-memory-run-queue-repository.js";
 import type { RunCallbackRepository } from "./repositories/run-callback-repository.js";
+import type { RunQueueRepository } from "./repositories/run-queue-repository.js";
 import { InMemorySessionWorkerRepository } from "./repositories/in-memory-session-worker-repository.js";
 import type { SessionWorkerRepository } from "./repositories/session-worker-repository.js";
 import { createHealthRouter } from "./routes/health.js";
+import { createRunQueueRouter } from "./routes/run-queue.js";
 import { createRunCallbacksRouter } from "./routes/run-callbacks.js";
 import { createRunsRouter } from "./routes/runs.js";
 import { createSessionWorkersRouter } from "./routes/session-workers.js";
 import { CallbackHandler } from "./services/callback-handler.js";
 import { LifecycleManager } from "./services/lifecycle-manager.js";
+import type { DrainQueueInput } from "./services/run-queue-manager.js";
+import { RunQueueManager } from "./services/run-queue-manager.js";
 import { RunOrchestrator } from "./services/run-orchestrator.js";
 
 export interface CreateControlPlaneAppOptions {
@@ -29,6 +34,11 @@ export interface CreateControlPlaneAppOptions {
   readonly workspaceSyncClient?: WorkspaceSyncClient;
   readonly executorClient?: ExecutorClient;
   readonly callbackRepository?: RunCallbackRepository;
+  readonly runQueueRepository?: RunQueueRepository;
+  readonly runQueueManagerOptions?: Pick<
+    DrainQueueInput,
+    "owner" | "lockMs" | "retryDelayMs"
+  >;
 }
 
 export function createControlPlaneApp(
@@ -45,6 +55,8 @@ export function createControlPlaneApp(
   const executorClient = options.executorClient ?? new NoopExecutorClient();
   const callbackRepository =
     options.callbackRepository ?? new InMemoryRunCallbackRepository();
+  const runQueueRepository =
+    options.runQueueRepository ?? new InMemoryRunQueueRepository();
 
   const lifecycleManager = new LifecycleManager(
     sessionWorkerRepository,
@@ -62,6 +74,11 @@ export function createControlPlaneApp(
   );
 
   const runOrchestrator = new RunOrchestrator(providerRegistry);
+  const runQueueManager = new RunQueueManager(
+    runQueueRepository,
+    runOrchestrator,
+    options.runQueueManagerOptions,
+  );
   const callbackHandler = new CallbackHandler({
     eventRepo: callbackRepository,
     runContextRepo: callbackRepository,
@@ -74,6 +91,7 @@ export function createControlPlaneApp(
   app.use(createHealthRouter());
   app.use("/api", createSessionWorkersRouter(lifecycleManager));
   app.use("/api", createRunsRouter(runOrchestrator));
+  app.use("/api", createRunQueueRouter(runQueueManager));
   app.use(
     "/api",
     createRunCallbacksRouter({
