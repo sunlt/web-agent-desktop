@@ -1,16 +1,29 @@
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useChat } from "@ai-sdk/react";
+import type {
+  ChatTransport,
+  FinishReason,
+  UIMessage,
+  UIMessageChunk,
+} from "ai";
+import {
+  FormEvent,
+  KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type ProviderKind = "claude-code" | "opencode" | "codex-cli";
-type Role = "user" | "assistant" | "system";
 type TodoStatus = "todo" | "doing" | "done" | "canceled";
-type UiRunStatus = "idle" | "running" | "succeeded" | "failed" | "blocked" | "canceled";
-
-type ChatMessage = {
-  id: string;
-  role: Role;
-  content: string;
-  createdAt: string;
-};
+type UiRunStatus =
+  | "idle"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "blocked"
+  | "canceled";
 
 type TodoItem = {
   runId: string;
@@ -91,7 +104,28 @@ type TimelineEntry = {
   label: string;
 };
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/$/, "");
+type PortalMessageMetadata = {
+  createdAt?: string;
+  runId?: string;
+};
+
+type PortalUiMessage = UIMessage<PortalMessageMetadata>;
+
+type RunStartMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
+type RunStartConfig = {
+  provider: ProviderKind;
+  model: string;
+  requireHumanLoop: boolean;
+};
+
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(
+  /\/$/,
+  "",
+);
 const POLL_MS = 3500;
 const MAX_TIMELINE = 200;
 
@@ -106,12 +140,10 @@ export default function App() {
   const [model, setModel] = useState<string>(DEFAULT_MODEL["codex-cli"]);
   const [requireHumanLoop, setRequireHumanLoop] = useState<boolean>(true);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState<string>("");
   const [runStatus, setRunStatus] = useState<UiRunStatus>("idle");
   const [runDetail, setRunDetail] = useState<string>("");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState<boolean>(false);
 
   const [todoItems, setTodoItems] = useState<TodoItem[]>([]);
   const [todoEvents, setTodoEvents] = useState<TodoEvent[]>([]);
@@ -122,10 +154,12 @@ export default function App() {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [errorText, setErrorText] = useState<string>("");
 
-  const nextMessageIdRef = useRef<number>(1);
-  const assistantMessageIdRef = useRef<string | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
-  const streamAbortRef = useRef<AbortController | null>(null);
+  const runConfigRef = useRef<RunStartConfig>({
+    provider: "codex-cli",
+    model: DEFAULT_MODEL["codex-cli"],
+    requireHumanLoop: true,
+  });
 
   useEffect(() => {
     setModel(DEFAULT_MODEL[provider]);
@@ -136,10 +170,12 @@ export default function App() {
   }, [activeRunId]);
 
   useEffect(() => {
-    return () => {
-      streamAbortRef.current?.abort();
+    runConfigRef.current = {
+      provider,
+      model,
+      requireHumanLoop,
     };
-  }, []);
+  }, [provider, model, requireHumanLoop]);
 
   const groupedTodos = useMemo(() => {
     const base: Record<TodoStatus, TodoItem[]> = {
@@ -163,17 +199,6 @@ export default function App() {
     return base;
   }, [todoItems]);
 
-  const createMessage = useCallback((role: Role, content: string): ChatMessage => {
-    const id = `m-${nextMessageIdRef.current}`;
-    nextMessageIdRef.current += 1;
-    return {
-      id,
-      role,
-      content,
-      createdAt: new Date().toISOString(),
-    };
-  }, []);
-
   const appendTimeline = useCallback((label: string, ts?: string) => {
     const entry: TimelineEntry = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -192,7 +217,9 @@ export default function App() {
 
   const upsertTodo = useCallback((todo: TodoItem) => {
     setTodoItems((prev) => {
-      const idx = prev.findIndex((item) => item.todoId === todo.todoId && item.runId === todo.runId);
+      const idx = prev.findIndex(
+        (item) => item.todoId === todo.todoId && item.runId === todo.runId,
+      );
       if (idx === -1) {
         return [...prev, todo];
       }
@@ -202,63 +229,163 @@ export default function App() {
     });
   }, []);
 
-  const appendAssistantDelta = useCallback((text: string) => {
-    const assistantId = assistantMessageIdRef.current;
-    if (!assistantId) {
-      return;
-    }
-
-    setMessages((prev) => {
-      const idx = prev.findIndex((message) => message.id === assistantId);
-      if (idx === -1) {
-        return prev;
+  const fetchJson = useCallback(
+    async <T,>(path: string, init?: RequestInit): Promise<T> => {
+      const response = await fetch(`${API_BASE}${path}`, init);
+      if (!response.ok) {
+        throw new Error(await resolveResponseError(response));
       }
-      const next = [...prev];
-      const target = next[idx];
-      if (!target) {
-        return prev;
-      }
-      next[idx] = {
-        ...target,
-        content: target.content + text,
-      };
-      return next;
-    });
-  }, []);
+      return (await response.json()) as T;
+    },
+    [],
+  );
 
-  const fetchJson = useCallback(async <T,>(path: string, init?: RequestInit): Promise<T> => {
-    const response = await fetch(`${API_BASE}${path}`, init);
-    if (!response.ok) {
-      const text = await response.text();
-      let message = `请求失败(${response.status})`;
-      if (text) {
-        try {
-          const parsed = JSON.parse(text) as { error?: string; reason?: string };
-          message = parsed.error ?? parsed.reason ?? text;
-        } catch {
-          message = text;
+  const refreshRunPanels = useCallback(
+    async (runId: string) => {
+      const [todos, todoHistory, pending] = await Promise.all([
+        fetchJson<{ items: TodoItem[] }>(
+          `/runs/${encodeURIComponent(runId)}/todos?limit=500`,
+        ),
+        fetchJson<{ events: TodoEvent[] }>(
+          `/runs/${encodeURIComponent(runId)}/todos/events?limit=500`,
+        ),
+        fetchJson<{ requests: HumanLoopRequest[] }>(
+          `/human-loop/pending?runId=${encodeURIComponent(runId)}&limit=200`,
+        ),
+      ]);
+
+      setTodoItems(todos.items ?? []);
+      setTodoEvents(todoHistory.events ?? []);
+      setPendingRequests(pending.requests ?? []);
+    },
+    [fetchJson],
+  );
+
+  const handleRunStatusEvent = useCallback(
+    (statusEvent: RunStatusEvent) => {
+      activeRunIdRef.current = statusEvent.runId;
+      setActiveRunId((prev) => prev ?? statusEvent.runId);
+      appendTimeline(
+        `run.status: ${statusEvent.status}${statusEvent.detail ? ` (${statusEvent.detail})` : ""}`,
+        statusEvent.ts,
+      );
+
+      if (statusEvent.status === "started") {
+        setRunStatus("running");
+        return;
+      }
+
+      if (statusEvent.status === "blocked") {
+        setRunStatus("blocked");
+        setRunDetail(statusEvent.detail ?? "provider 不支持 human-loop");
+        setErrorText(statusEvent.detail ?? "运行被阻塞");
+        return;
+      }
+
+      if (statusEvent.status === "failed") {
+        setRunStatus("failed");
+        setRunDetail(statusEvent.detail ?? "运行失败");
+        setErrorText(statusEvent.detail ?? "运行失败");
+        return;
+      }
+
+      const detail = (statusEvent.detail ?? "").toLowerCase();
+      if (detail === "canceled") {
+        setRunStatus("canceled");
+      } else if (detail === "succeeded") {
+        setRunStatus("succeeded");
+      } else {
+        setRunStatus("failed");
+        if (statusEvent.detail) {
+          setRunDetail(statusEvent.detail);
         }
       }
-      throw new Error(message);
-    }
-    return (await response.json()) as T;
-  }, []);
+    },
+    [appendTimeline],
+  );
 
-  const refreshRunPanels = useCallback(async (runId: string) => {
-    const [todos, todoHistory, pending] = await Promise.all([
-      fetchJson<{ items: TodoItem[] }>(
-        `/runs/${encodeURIComponent(runId)}/todos?limit=500`,
-      ),
-      fetchJson<{ events: TodoEvent[] }>(
-        `/runs/${encodeURIComponent(runId)}/todos/events?limit=500`,
-      ),
-      fetchJson<{ requests: HumanLoopRequest[] }>(`/human-loop/pending?runId=${encodeURIComponent(runId)}&limit=200`),
-    ]);
+  const handleTodoUpdateEvent = useCallback(
+    (todoEvent: TodoUpdateEvent) => {
+      const item: TodoItem = {
+        runId: todoEvent.runId,
+        todoId: todoEvent.todo.todoId,
+        content: todoEvent.todo.content,
+        status: todoEvent.todo.status,
+        order: todoEvent.todo.order,
+        updatedAt: todoEvent.ts,
+      };
 
-    setTodoItems(todos.items ?? []);
-    setTodoEvents(todoHistory.events ?? []);
-    setPendingRequests(pending.requests ?? []);
-  }, [fetchJson]);
+      upsertTodo(item);
+      setTodoEvents((prev) => [
+        ...prev,
+        {
+          eventId: `stream-${todoEvent.runId}-${todoEvent.todo.todoId}-${todoEvent.ts}`,
+          runId: todoEvent.runId,
+          todoId: todoEvent.todo.todoId,
+          content: todoEvent.todo.content,
+          status: todoEvent.todo.status,
+          order: todoEvent.todo.order,
+          eventTs: todoEvent.ts,
+        },
+      ]);
+      appendTimeline(
+        `todo.update: ${todoEvent.todo.status} #${todoEvent.todo.order} ${todoEvent.todo.content}`,
+        todoEvent.ts,
+      );
+    },
+    [appendTimeline, upsertTodo],
+  );
+
+  const handleRunWarningEvent = useCallback(
+    (warningEvent: RunWarningEvent) => {
+      appendTimeline(`warning: ${warningEvent.warning}`, warningEvent.ts);
+    },
+    [appendTimeline],
+  );
+
+  const transport = useMemo<ChatTransport<PortalUiMessage>>(
+    () =>
+      createControlPlaneTransport({
+        apiBase: API_BASE,
+        getRunConfig: () => runConfigRef.current,
+        onRunStatus: handleRunStatusEvent,
+        onTodoUpdate: handleTodoUpdateEvent,
+        onRunWarning: handleRunWarningEvent,
+        onRunClosed: () => {
+          appendTimeline("run.closed");
+        },
+      }),
+    [
+      appendTimeline,
+      handleRunStatusEvent,
+      handleRunWarningEvent,
+      handleTodoUpdateEvent,
+    ],
+  );
+
+  const {
+    messages,
+    sendMessage,
+    stop,
+    status: chatStatus,
+    clearError,
+  } = useChat<PortalUiMessage>({
+    transport,
+    onError: (error) => {
+      setErrorText(error.message);
+      setRunDetail(error.message);
+      setRunStatus("failed");
+      appendTimeline(`run.error: ${error.message}`);
+    },
+    onFinish: () => {
+      const runId = activeRunIdRef.current;
+      if (runId) {
+        void refreshRunPanels(runId);
+      }
+    },
+  });
+
+  const submitting = chatStatus === "submitted" || chatStatus === "streaming";
 
   useEffect(() => {
     if (!activeRunId) {
@@ -280,125 +407,6 @@ export default function App() {
     };
   }, [activeRunId, runStatus, refreshRunPanels]);
 
-  const consumeSse = useCallback(
-    async (response: Response) => {
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("SSE 响应体为空");
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const parsed = parseSseBuffer(buffer);
-        buffer = parsed.rest;
-
-        for (const event of parsed.events) {
-          if (event.event === "run.closed") {
-            appendTimeline("run.closed");
-            continue;
-          }
-
-          if (!event.data || typeof event.data !== "object") {
-            continue;
-          }
-
-          const payload = event.data as { type?: string };
-          switch (payload.type) {
-            case "run.status": {
-              const statusEvent = payload as RunStatusEvent;
-              activeRunIdRef.current = statusEvent.runId;
-              setActiveRunId((prev) => prev ?? statusEvent.runId);
-              appendTimeline(`run.status: ${statusEvent.status}${statusEvent.detail ? ` (${statusEvent.detail})` : ""}`, statusEvent.ts);
-
-              if (statusEvent.status === "started") {
-                setRunStatus("running");
-                continue;
-              }
-
-              if (statusEvent.status === "blocked") {
-                setRunStatus("blocked");
-                setRunDetail(statusEvent.detail ?? "provider 不支持 human-loop");
-                setErrorText(statusEvent.detail ?? "运行被阻塞");
-                continue;
-              }
-
-              if (statusEvent.status === "failed") {
-                setRunStatus("failed");
-                setRunDetail(statusEvent.detail ?? "运行失败");
-                setErrorText(statusEvent.detail ?? "运行失败");
-                continue;
-              }
-
-              const detail = (statusEvent.detail ?? "").toLowerCase();
-              if (detail === "canceled") {
-                setRunStatus("canceled");
-              } else if (detail === "succeeded") {
-                setRunStatus("succeeded");
-              } else {
-                setRunStatus("failed");
-                if (statusEvent.detail) {
-                  setRunDetail(statusEvent.detail);
-                }
-              }
-              continue;
-            }
-
-            case "message.delta": {
-              const deltaEvent = payload as MessageDeltaEvent;
-              appendAssistantDelta(deltaEvent.text);
-              continue;
-            }
-
-            case "run.warning": {
-              const warningEvent = payload as RunWarningEvent;
-              appendTimeline(`warning: ${warningEvent.warning}`, warningEvent.ts);
-              continue;
-            }
-
-            case "todo.update": {
-              const todoEvent = payload as TodoUpdateEvent;
-              const item: TodoItem = {
-                runId: todoEvent.runId,
-                todoId: todoEvent.todo.todoId,
-                content: todoEvent.todo.content,
-                status: todoEvent.todo.status,
-                order: todoEvent.todo.order,
-                updatedAt: todoEvent.ts,
-              };
-              upsertTodo(item);
-              setTodoEvents((prev) => [
-                ...prev,
-                {
-                  eventId: `stream-${todoEvent.runId}-${todoEvent.todo.todoId}-${todoEvent.ts}`,
-                  runId: todoEvent.runId,
-                  todoId: todoEvent.todo.todoId,
-                  content: todoEvent.todo.content,
-                  status: todoEvent.todo.status,
-                  order: todoEvent.todo.order,
-                  eventTs: todoEvent.ts,
-                },
-              ]);
-              appendTimeline(`todo.update: ${todoEvent.todo.status} #${todoEvent.todo.order} ${todoEvent.todo.content}`, todoEvent.ts);
-              continue;
-            }
-
-            default:
-              continue;
-          }
-        }
-      }
-    },
-    [appendAssistantDelta, appendTimeline, upsertTodo],
-  );
-
   const handleSend = useCallback(
     async (event?: FormEvent) => {
       event?.preventDefault();
@@ -411,19 +419,8 @@ export default function App() {
         return;
       }
 
-      const userMessage = createMessage("user", text);
-      const assistantMessage = createMessage("assistant", "");
-      const historyMessages = [...messages, userMessage];
-      const nextMessages = [...historyMessages, assistantMessage];
-
-      assistantMessageIdRef.current = assistantMessage.id;
       activeRunIdRef.current = null;
-      streamAbortRef.current?.abort();
-      streamAbortRef.current = new AbortController();
-
-      setMessages(nextMessages);
       setInput("");
-      setSubmitting(true);
       setRunStatus("running");
       setRunDetail("");
       setErrorText("");
@@ -432,100 +429,63 @@ export default function App() {
       setTodoEvents([]);
       setPendingRequests([]);
       setTimeline([]);
+      clearError();
       appendTimeline(`run.start (${provider})`);
 
       try {
-        const response = await fetch(`${API_BASE}/runs/start`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            accept: "text/event-stream",
+        await sendMessage({
+          text,
+          metadata: {
+            createdAt: new Date().toISOString(),
           },
-          body: JSON.stringify({
-            provider,
-            model,
-            requireHumanLoop,
-            messages: historyMessages
-              .filter((item) => item.role === "user" || item.role === "assistant" || item.role === "system")
-              .map((item) => ({
-                role: item.role,
-                content: item.content,
-              })),
-          }),
-          signal: streamAbortRef.current.signal,
         });
-
-        if (!response.ok) {
-          const bodyText = await response.text();
-          let failure = `启动失败(${response.status})`;
-          if (bodyText) {
-            try {
-              const payload = JSON.parse(bodyText) as { error?: string; reason?: string };
-              failure = payload.error ?? payload.reason ?? bodyText;
-            } catch {
-              failure = bodyText;
-            }
-          }
-          throw new Error(failure);
-        }
-
-        await consumeSse(response);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           appendTimeline("stream.aborted");
           setRunStatus("canceled");
-        } else {
-          const message = error instanceof Error ? error.message : String(error);
-          setErrorText(message);
-          setRunDetail(message);
-          setRunStatus("failed");
-          appendTimeline(`run.error: ${message}`);
+          return;
         }
+        const message = error instanceof Error ? error.message : String(error);
+        setErrorText(message);
+        setRunDetail(message);
+        setRunStatus("failed");
+        appendTimeline(`run.error: ${message}`);
       } finally {
         const runId = activeRunIdRef.current;
         if (runId) {
           void refreshRunPanels(runId);
         }
-        assistantMessageIdRef.current = null;
-        setSubmitting(false);
       }
     },
     [
-      input,
-      submitting,
-      runStatus,
-      createMessage,
-      messages,
       appendTimeline,
+      clearError,
+      input,
       provider,
-      model,
-      requireHumanLoop,
-      consumeSse,
-      activeRunId,
       refreshRunPanels,
+      runStatus,
+      sendMessage,
+      submitting,
     ],
   );
 
   const handleStop = useCallback(async () => {
-    if (!activeRunId || runStatus !== "running") {
-      streamAbortRef.current?.abort();
-      return;
-    }
-
     try {
-      await fetchJson(`/runs/${activeRunId}/stop`, {
-        method: "POST",
-      });
-      setRunStatus("canceled");
-      appendTimeline("run.stop requested");
+      if (activeRunId && runStatus === "running") {
+        await fetchJson(`/runs/${activeRunId}/stop`, {
+          method: "POST",
+        });
+        setRunStatus("canceled");
+        appendTimeline("run.stop requested");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setErrorText(message);
       appendTimeline(`run.stop failed: ${message}`);
     } finally {
-      streamAbortRef.current?.abort();
+      await stop();
     }
-  }, [activeRunId, runStatus, fetchJson, appendTimeline]);
+  }, [activeRunId, appendTimeline, fetchJson, runStatus, stop]);
 
   const handleReply = useCallback(
     async (request: HumanLoopRequest) => {
@@ -538,17 +498,20 @@ export default function App() {
       setErrorText("");
 
       try {
-        await fetchJson<{ ok: boolean; status?: string; duplicate?: boolean }>("/human-loop/reply", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
+        await fetchJson<{ ok: boolean; status?: string; duplicate?: boolean }>(
+          "/human-loop/reply",
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              runId: request.runId,
+              questionId: request.questionId,
+              answer,
+            }),
           },
-          body: JSON.stringify({
-            runId: request.runId,
-            questionId: request.questionId,
-            answer,
-          }),
-        });
+        );
 
         setAnswerDrafts((prev) => {
           const next = { ...prev };
@@ -566,7 +529,7 @@ export default function App() {
         setReplying((prev) => ({ ...prev, [request.questionId]: false }));
       }
     },
-    [answerDrafts, fetchJson, appendTimeline, refreshRunPanels],
+    [answerDrafts, appendTimeline, fetchJson, refreshRunPanels],
   );
 
   const onInputKeyDown = useCallback(
@@ -595,7 +558,11 @@ export default function App() {
       <section className="control-bar">
         <label>
           Provider
-          <select value={provider} onChange={(e) => setProvider(e.target.value as ProviderKind)} disabled={runStatus === "running"}>
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value as ProviderKind)}
+            disabled={runStatus === "running"}
+          >
             <option value="codex-cli">codex-cli</option>
             <option value="opencode">opencode</option>
             <option value="claude-code">claude-code</option>
@@ -604,11 +571,21 @@ export default function App() {
 
         <label>
           Model
-          <input value={model} onChange={(e) => setModel(e.target.value)} disabled={runStatus === "running"} placeholder="输入模型 ID" />
+          <input
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            disabled={runStatus === "running"}
+            placeholder="输入模型 ID"
+          />
         </label>
 
         <label className="checkbox-row">
-          <input type="checkbox" checked={requireHumanLoop} onChange={(e) => setRequireHumanLoop(e.target.checked)} disabled={runStatus === "running"} />
+          <input
+            type="checkbox"
+            checked={requireHumanLoop}
+            onChange={(e) => setRequireHumanLoop(e.target.checked)}
+            disabled={runStatus === "running"}
+          />
           <span>require human-loop</span>
         </label>
       </section>
@@ -619,16 +596,28 @@ export default function App() {
             {messages.length === 0 ? (
               <div className="empty-state">
                 <h2>输入你的任务指令</h2>
-                <p>消息会通过 <code>POST /api/runs/start</code> 进入真实执行链路，右侧同步展示 Todo 与 Human-loop。</p>
+                <p>
+                  消息会通过 <code>POST /api/runs/start</code> 进入真实执行链路，右侧同步展示
+                  Todo 与 Human-loop。
+                </p>
               </div>
             ) : (
               messages.map((message) => (
                 <article key={message.id} className={`bubble bubble-${message.role}`}>
                   <header>
                     <strong>{message.role}</strong>
-                    <time>{formatTime(message.createdAt)}</time>
+                    <time>
+                      {message.metadata?.createdAt
+                        ? formatTime(message.metadata.createdAt)
+                        : "-"}
+                    </time>
                   </header>
-                  <pre>{message.content || (message.role === "assistant" && runStatus === "running" ? "..." : "")}</pre>
+                  <pre>
+                    {extractMessageText(message) ||
+                      (message.role === "assistant" && runStatus === "running"
+                        ? "..."
+                        : "")}
+                  </pre>
                 </article>
               ))
             )}
@@ -644,10 +633,18 @@ export default function App() {
               disabled={submitting}
             />
             <div className="composer-actions">
-              <button type="submit" disabled={submitting || runStatus === "running" || !input.trim()}>
+              <button
+                type="submit"
+                disabled={submitting || runStatus === "running" || !input.trim()}
+              >
                 发送
               </button>
-              <button type="button" className="secondary" disabled={runStatus !== "running"} onClick={() => void handleStop()}>
+              <button
+                type="button"
+                className="secondary"
+                disabled={runStatus !== "running"}
+                onClick={() => void handleStop()}
+              >
                 停止
               </button>
             </div>
@@ -699,7 +696,9 @@ export default function App() {
                   {todoEvents.slice(-20).map((event) => (
                     <li key={event.eventId}>
                       <time>{formatTime(event.eventTs)}</time>
-                      <span>[{event.status}] #{event.order} {event.content}</span>
+                      <span>
+                        [{event.status}] #{event.order} {event.content}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -733,7 +732,10 @@ export default function App() {
                     />
                     <button
                       type="button"
-                      disabled={replying[request.questionId] === true || !(answerDrafts[request.questionId] ?? "").trim()}
+                      disabled={
+                        replying[request.questionId] === true ||
+                        !(answerDrafts[request.questionId] ?? "").trim()
+                      }
                       onClick={() => void handleReply(request)}
                     >
                       {replying[request.questionId] ? "提交中..." : "提交回复"}
@@ -763,6 +765,254 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function createControlPlaneTransport(input: {
+  apiBase: string;
+  getRunConfig: () => RunStartConfig;
+  onRunStatus: (event: RunStatusEvent) => void;
+  onTodoUpdate: (event: TodoUpdateEvent) => void;
+  onRunWarning: (event: RunWarningEvent) => void;
+  onRunClosed: () => void;
+}): ChatTransport<PortalUiMessage> {
+  return {
+    sendMessages: async ({ messages, abortSignal }) => {
+      const runConfig = input.getRunConfig();
+      const runMessages = toRunMessages(messages);
+      if (runMessages.length === 0) {
+        throw new Error("消息不能为空");
+      }
+
+      const response = await fetch(`${input.apiBase}/runs/start`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "text/event-stream",
+        },
+        body: JSON.stringify({
+          provider: runConfig.provider,
+          model: runConfig.model,
+          requireHumanLoop: runConfig.requireHumanLoop,
+          messages: runMessages,
+        }),
+        signal: abortSignal ?? null,
+      });
+
+      if (!response.ok) {
+        throw new Error(await resolveResponseError(response));
+      }
+
+      if (!response.body) {
+        throw new Error("SSE 响应体为空");
+      }
+
+      return sseToUiMessageChunkStream({
+        stream: response.body,
+        abortSignal,
+        onRunStatus: input.onRunStatus,
+        onTodoUpdate: input.onTodoUpdate,
+        onRunWarning: input.onRunWarning,
+        onRunClosed: input.onRunClosed,
+      });
+    },
+    reconnectToStream: async () => null,
+  };
+}
+
+function sseToUiMessageChunkStream(input: {
+  stream: ReadableStream<Uint8Array>;
+  abortSignal: AbortSignal | undefined;
+  onRunStatus: (event: RunStatusEvent) => void;
+  onTodoUpdate: (event: TodoUpdateEvent) => void;
+  onRunWarning: (event: RunWarningEvent) => void;
+  onRunClosed: () => void;
+}): ReadableStream<UIMessageChunk<PortalMessageMetadata>> {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+  return new ReadableStream<UIMessageChunk<PortalMessageMetadata>>({
+    start(controller) {
+      reader = input.stream.getReader();
+      const decoder = new TextDecoder();
+      const textPartId = `text-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const createdAt = new Date().toISOString();
+
+      let buffer = "";
+      let textStarted = false;
+      let finished = false;
+      let runId: string | undefined;
+      const buildMetadata = (): PortalMessageMetadata =>
+        runId ? { createdAt, runId } : { createdAt };
+
+      const pushFinish = (finishReason: FinishReason = "stop") => {
+        if (finished) {
+          return;
+        }
+        if (textStarted) {
+          controller.enqueue({
+            type: "text-end",
+            id: textPartId,
+          });
+        }
+        controller.enqueue({
+          type: "finish",
+          finishReason,
+          messageMetadata: buildMetadata(),
+        });
+        controller.close();
+        finished = true;
+      };
+
+      const pushErrorAndFinish = (message: string) => {
+        if (finished) {
+          return;
+        }
+        controller.enqueue({
+          type: "error",
+          errorText: message,
+        });
+        pushFinish("error");
+      };
+
+      const ensureTextStarted = () => {
+        if (textStarted) {
+          return;
+        }
+        controller.enqueue({
+          type: "text-start",
+          id: textPartId,
+        });
+        textStarted = true;
+      };
+
+      const abortHandler = () => {
+        void reader?.cancel();
+      };
+
+      input.abortSignal?.addEventListener("abort", abortHandler);
+
+      controller.enqueue({
+        type: "start",
+        messageMetadata: {
+          createdAt,
+        },
+      });
+
+      void (async () => {
+        try {
+          while (true) {
+            const result = await reader?.read();
+            if (!result) {
+              break;
+            }
+            const { value, done } = result;
+            if (done) {
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const parsed = parseSseBuffer(buffer);
+            buffer = parsed.rest;
+
+            for (const event of parsed.events) {
+              if (event.event === "run.closed") {
+                input.onRunClosed();
+                pushFinish("stop");
+                return;
+              }
+
+              if (!event.data || typeof event.data !== "object") {
+                continue;
+              }
+
+              const payload = event.data as { type?: string };
+
+              if (payload.type === "run.status") {
+                const statusEvent = payload as RunStatusEvent;
+                runId = statusEvent.runId;
+                input.onRunStatus(statusEvent);
+
+                controller.enqueue({
+                  type: "message-metadata",
+                  messageMetadata: buildMetadata(),
+                });
+
+                if (statusEvent.status === "failed") {
+                  pushErrorAndFinish(statusEvent.detail ?? "运行失败");
+                  return;
+                }
+
+                if (statusEvent.status === "blocked") {
+                  pushErrorAndFinish(statusEvent.detail ?? "运行被阻塞");
+                  return;
+                }
+
+                if (statusEvent.status === "finished") {
+                  const detail = (statusEvent.detail ?? "").toLowerCase();
+                  if (detail === "canceled") {
+                    controller.enqueue({
+                      type: "abort",
+                      reason: "canceled",
+                    });
+                  }
+                  pushFinish("stop");
+                  return;
+                }
+
+                continue;
+              }
+
+              if (payload.type === "message.delta") {
+                const deltaEvent = payload as MessageDeltaEvent;
+                ensureTextStarted();
+                controller.enqueue({
+                  type: "text-delta",
+                  id: textPartId,
+                  delta: deltaEvent.text,
+                });
+                continue;
+              }
+
+              if (payload.type === "todo.update") {
+                input.onTodoUpdate(payload as TodoUpdateEvent);
+                continue;
+              }
+
+              if (payload.type === "run.warning") {
+                input.onRunWarning(payload as RunWarningEvent);
+              }
+            }
+          }
+
+          pushFinish("stop");
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            controller.enqueue({
+              type: "abort",
+              reason: "aborted",
+            });
+            pushFinish("other");
+            return;
+          }
+
+          pushErrorAndFinish(error instanceof Error ? error.message : String(error));
+        } finally {
+          input.abortSignal?.removeEventListener("abort", abortHandler);
+        }
+      })();
+    },
+    cancel() {
+      void reader?.cancel();
+    },
+  });
+}
+
+function toRunMessages(messages: PortalUiMessage[]): RunStartMessage[] {
+  return messages
+    .map((message) => ({
+      role: message.role,
+      content: extractMessageText(message).trim(),
+    }))
+    .filter((message) => message.content.length > 0);
 }
 
 function parseSseBuffer(raw: string): { events: ParsedSseEvent[]; rest: string } {
@@ -813,6 +1063,30 @@ function parseSseBuffer(raw: string): { events: ParsedSseEvent[]; rest: string }
     events,
     rest,
   };
+}
+
+function extractMessageText(message: PortalUiMessage): string {
+  return message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("");
+}
+
+async function resolveResponseError(response: Response): Promise<string> {
+  const text = await response.text();
+  let message = `请求失败(${response.status})`;
+  if (!text) {
+    return message;
+  }
+
+  try {
+    const parsed = JSON.parse(text) as { error?: string; reason?: string };
+    return parsed.error ?? parsed.reason ?? text;
+  } catch {
+    message = text;
+  }
+
+  return message;
 }
 
 function formatTime(value: string): string {

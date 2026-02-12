@@ -847,3 +847,45 @@
 
 ### next_phase
 - Phase 16：补充前端 E2E（ChatUI + todo + human-loop）与 executor/网关观测增强。
+
+---
+
+## Phase 16: 前端 useChat 接入与剩余任务重排
+
+### objective
+- 将前端聊天状态管理迁移到 `ai-sdk/react`，并保留当前 run/todo/human-loop 真实链路能力。
+
+### inputs
+- 已完成的 React ChatUI（手写 SSE 解析版）。
+- 已完成的后端 `POST /api/runs/start` SSE 事件流。
+
+### actions
+- 在 `portal` 引入 `@ai-sdk/react` 与 `ai` 依赖。
+- 将 `portal/src/App.tsx` 重构为：
+  - 使用 `useChat` 管理消息发送与消息列表。
+  - 通过自定义 `ChatTransport` 兼容现有 `/api/runs/start` SSE 协议。
+  - 将 `run.status/message.delta/todo.update/run.warning/run.closed` 映射到 UIMessage chunk + 侧边面板状态。
+- 同步更新剩余研发清单：
+  - `REMAINING_DEVELOPMENT_TASKS.md` 新增 Phase 16（进行中）与 Phase 17（待启动），明确前端缺口（历史会话、文件域、商店接入、前端 E2E）。
+
+### outputs
+- `portal/src/App.tsx`
+- `portal/package.json`
+- `portal/package-lock.json`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `cd portal && npm run build`
+- results:
+  - TypeScript + Vite 构建通过。
+
+### gate_result
+- **Pass**（前端已接入 `ai-sdk/react` 且现有主链路无回退）
+
+### risks
+- 当前仍缺少前端自动化 E2E，回归主要依赖手工联调与构建门禁。
+- 历史会话、文件编辑/预览、应用商店接入仍未落地。
+
+### next_phase
+- Phase 17：补齐前端 E2E 与工作台剩余能力（history/files/store/stream-reconnect）。

@@ -237,6 +237,61 @@
 
 ---
 
+## Phase 16: 前端 Chat 协议 SDK 化与缺口梳理（进行中）
+**Type**: Frontend + Protocol
+**Estimated**: 4~8 小时
+**目标**: 接入 `ai-sdk/react`，在不改核心后端协议的前提下统一 ChatUI 消息流，同时明确前端剩余研发清单。
+
+**范围文件**:
+- `portal/src/App.tsx`
+- `portal/package.json`
+- `portal/package-lock.json`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+**Tasks**:
+- [x] 在 `portal` 引入 `@ai-sdk/react` 与 `ai` 依赖。
+- [x] 使用 `useChat` 管理消息状态与发送动作。
+- [x] 实现自定义 `ChatTransport`，兼容现有 `POST /api/runs/start` SSE 事件流。
+- [x] 保持 Todo / Human-loop / Run Timeline 面板与原有事件联动能力。
+- [ ] 新增前端 E2E（至少覆盖发送消息、流式回包、todo 更新、human-loop 回复）。
+
+**Verification Criteria**:
+- [ ] `cd portal && npm run build` 通过。
+- [ ] `cd portal && npm run test`（若引入前端测试）通过。
+
+**Exit Criteria**:
+- 前端已使用 `ai-sdk/react`，并且现有 run/todo/human-loop 主链路无回退。
+
+---
+
+## Phase 17: 前端剩余能力（待启动）
+**Type**: Frontend + Product
+**Estimated**: 10~16 小时
+**目标**: 对齐 `设计.md` 中尚未完成的工作台能力，补齐历史会话、文件域、应用商店与稳定性测试。
+
+**范围文件**:
+- `portal/src/*`
+- `control-plane/src/routes/*`
+- `control-plane/src/services/*`
+- `control-plane/test/e2e/*`
+
+**Tasks**:
+- [ ] 历史会话：对接会话列表/加载/恢复（`chatId -> session_id` 映射）。
+- [ ] 文件域：补齐上传/重命名/删除/在线编辑 + 审计闭环。
+- [ ] 文件预览：文本高亮、图片/PDF 内嵌、大文件分页读取。
+- [ ] 应用商店接入：展示可见/可用应用并与会话入口联动。
+- [ ] Human-loop 体验完善：超时提示、重复回复幂等反馈、resolved 历史回看。
+- [ ] 前端流式稳定性：断线重连、游标恢复、异常态提示一致性。
+
+**Verification Criteria**:
+- [ ] 前端 E2E 覆盖核心路径并通过 CI。
+- [ ] 真实环境联调（compose + external executor）下可稳定完成完整对话闭环。
+
+**Exit Criteria**:
+- 前端工作台达到 `设计.md` 的 M2+ 交互完整度基线。
+
+---
+
 ## 执行顺序
 1. Phase 8（已完成）
 2. Phase 9（已完成）
@@ -246,7 +301,9 @@
 6. Phase 13（已完成）
 7. Phase 14（已完成）
 8. Phase 15（已完成）
+9. Phase 16（进行中）
+10. Phase 17（待启动）
 
 ## 当前阶段
-- `in_progress`: Phase 16 规划中（前端 E2E 与网关/观测增强）
-- `next_commit`: `feat(phase-15): add standalone executor service and external real e2e`
+- `in_progress`: Phase 16（`ai-sdk/react` 接入 + 前端剩余任务分解）
+- `next_commit`: `feat(phase-16): migrate portal chat state to ai-sdk-react useChat`
