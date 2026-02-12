@@ -13,10 +13,14 @@ import type { ExecutorClient } from "./ports/executor-client.js";
 import type { WorkspaceSyncClient } from "./ports/workspace-sync-client.js";
 import { InMemoryRunCallbackRepository } from "./repositories/in-memory-run-callback-repository.js";
 import { InMemoryRunQueueRepository } from "./repositories/in-memory-run-queue-repository.js";
+import { InMemoryRbacRepository } from "./repositories/in-memory-rbac-repository.js";
 import type { RunCallbackRepository } from "./repositories/run-callback-repository.js";
 import type { RunQueueRepository } from "./repositories/run-queue-repository.js";
+import type { RbacRepository } from "./repositories/rbac-repository.js";
 import { InMemorySessionWorkerRepository } from "./repositories/in-memory-session-worker-repository.js";
 import type { SessionWorkerRepository } from "./repositories/session-worker-repository.js";
+import { createAppsRouter } from "./routes/apps.js";
+import { createFilesRouter } from "./routes/files.js";
 import { createHealthRouter } from "./routes/health.js";
 import { createRunQueueRouter } from "./routes/run-queue.js";
 import { createRunCallbacksRouter } from "./routes/run-callbacks.js";
@@ -29,6 +33,7 @@ import type { DrainQueueInput } from "./services/run-queue-manager.js";
 import { RunQueueManager } from "./services/run-queue-manager.js";
 import { Reconciler } from "./services/reconciler.js";
 import { RunOrchestrator } from "./services/run-orchestrator.js";
+import { LocalReadonlyFileBrowser, type FileBrowser } from "./services/file-browser.js";
 
 export interface CreateControlPlaneAppOptions {
   readonly providerAdapters?: readonly AgentProviderAdapter[];
@@ -43,6 +48,8 @@ export interface CreateControlPlaneAppOptions {
     lockMs?: DrainQueueInput["lockMs"];
     retryDelayMs?: DrainQueueInput["retryDelayMs"];
   };
+  readonly rbacRepository?: RbacRepository;
+  readonly fileBrowser?: FileBrowser;
   readonly logger?: Logger;
 }
 
@@ -62,6 +69,10 @@ export function createControlPlaneApp(
     options.callbackRepository ?? new InMemoryRunCallbackRepository();
   const runQueueRepository =
     options.runQueueRepository ?? new InMemoryRunQueueRepository();
+  const rbacRepository =
+    options.rbacRepository ?? new InMemoryRbacRepository();
+  const fileBrowser =
+    options.fileBrowser ?? new LocalReadonlyFileBrowser(process.cwd());
   const logger = options.logger ?? createLogger({ component: "control-plane" });
 
   const lifecycleManager = new LifecycleManager(
@@ -110,6 +121,14 @@ export function createControlPlaneApp(
   app.use("/api", createRunsRouter(runOrchestrator));
   app.use("/api", createRunQueueRouter(runQueueManager));
   app.use("/api", createReconcileRouter(reconciler));
+  app.use("/api", createAppsRouter(rbacRepository));
+  app.use(
+    "/api",
+    createFilesRouter({
+      rbacRepository,
+      fileBrowser,
+    }),
+  );
   app.use(
     "/api",
     createRunCallbacksRouter({

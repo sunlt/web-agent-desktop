@@ -4,7 +4,9 @@ import { ExecutorHttpClient } from "./adapters/executor-http-client.js";
 import { createPostgresPool } from "./adapters/postgres-pool.js";
 import { PostgresRunCallbackRepository } from "./repositories/postgres-run-callback-repository.js";
 import { PostgresRunQueueRepository } from "./repositories/postgres-run-queue-repository.js";
+import { PostgresRbacRepository } from "./repositories/postgres-rbac-repository.js";
 import { PostgresSessionWorkerRepository } from "./repositories/postgres-session-worker-repository.js";
+import { LocalReadonlyFileBrowser } from "./services/file-browser.js";
 
 const usePostgres = process.env.CONTROL_PLANE_STORAGE === "postgres";
 const useDockerCli = process.env.CONTROL_PLANE_DOCKER === "cli";
@@ -20,6 +22,9 @@ const callbackRepository = pool
   : undefined;
 const runQueueRepository = pool
   ? new PostgresRunQueueRepository(pool)
+  : undefined;
+const rbacRepository = pool
+  ? new PostgresRbacRepository(pool)
   : undefined;
 
 const dockerClient = useDockerCli
@@ -53,6 +58,10 @@ const app = createControlPlaneApp({
   workspaceSyncClient: executorClient,
   executorClient,
   runQueueRepository,
+  rbacRepository,
+  fileBrowser: new LocalReadonlyFileBrowser(
+    process.env.FILE_BROWSER_ROOT ?? process.cwd(),
+  ),
   runQueueManagerOptions: {
     owner: process.env.RUN_QUEUE_OWNER,
     lockMs: parseNumber(process.env.RUN_QUEUE_LOCK_MS, 15_000),

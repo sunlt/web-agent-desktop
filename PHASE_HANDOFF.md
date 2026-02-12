@@ -611,3 +611,71 @@
 
 ### next_phase
 - Phase 12：M2 能力补齐（应用商店可见/可用 + 文件只读浏览/下载 + RBAC 基线）。
+
+---
+
+## Phase 12: M2 平台能力补齐（当前迭代切片 L）
+
+### objective
+- 落地 M2 最小可运营能力：应用商店可见/可用判定、文件只读浏览下载、文件审计留痕。
+
+### inputs
+- 已完成 Phase 8~11 的基础能力（可靠执行、队列、流式、对账）
+- `设计.md` 第 14/15/17/18/22 章
+
+### actions
+- 新增 RBAC 仓储抽象 `RbacRepository`：
+  - 能力：`listStoreAppsForUser`、`canReadPath`、`recordFileAudit`
+  - 实现：`InMemoryRbacRepository`、`PostgresRbacRepository`
+- 新增数据库迁移 `002_rbac_and_file_acl.sql`：
+  - `users/roles/user_role_bindings`
+  - `apps/app_visibility_rules/app_members`
+  - `file_acl_policies/file_audit_logs`
+- 新增文件浏览服务 `LocalReadonlyFileBrowser`：
+  - 受限根目录
+  - 路径越界防护
+  - 目录树与文件下载能力
+- 新增路由：
+  - `GET /api/apps/store?userId=...`（仅返回可见 app，含 `canUse`）
+  - `GET /api/files/tree?userId=...&path=...`
+  - `GET /api/files/download?userId=...&path=...`
+- 审计：
+  - `files tree/download` 均记录 `allowed + reason` 审计
+- app/server 组装：
+  - 默认 InMemory RBAC + 本地只读文件浏览器
+  - Postgres 模式下启用 `PostgresRbacRepository`
+  - 文件根目录支持 `FILE_BROWSER_ROOT` 环境变量
+- 新增 E2E：
+  - `apps-files-rbac.e2e.test.ts` 覆盖可见/可用、文件授权、403 拒绝、审计落点
+
+### outputs
+- `control-plane/src/repositories/rbac-repository.ts`
+- `control-plane/src/repositories/in-memory-rbac-repository.ts`
+- `control-plane/src/repositories/postgres-rbac-repository.ts`
+- `control-plane/src/services/file-browser.ts`
+- `control-plane/src/routes/apps.ts`
+- `control-plane/src/routes/files.ts`
+- `control-plane/sql/002_rbac_and_file_acl.sql`
+- `control-plane/src/app.ts`
+- `control-plane/src/server.ts`
+- `control-plane/test/e2e/apps-files-rbac.e2e.test.ts`
+
+### validation
+- commands:
+  - `npm run build`
+  - `npm test`
+  - `npm run test:e2e:real`
+- results:
+  - TypeScript 构建通过
+  - Vitest 常规集通过（新增 apps-files-rbac E2E）
+  - 真实依赖 E2E 通过（无回归）
+
+### gate_result
+- **Pass**（M2 最小平台能力基线已完成）
+
+### risks
+- 当前文件能力仍是本地只读浏览器实现，未直接对接 RustFS 预签名下载链路。
+- RBAC 规则仍为最小子集，缺少管理端 CRUD 与更细粒度 action/scope 编排。
+
+### next_phase
+- 可选扩展：接入 RustFS 文件网关与预签名下载、完善 RBAC 管理 API、补告警与审计检索接口。

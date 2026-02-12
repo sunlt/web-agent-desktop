@@ -219,3 +219,24 @@
 
 **Exit Criteria**:
 - 关键异常路径具备自动修复入口，日志字段可用于跨链路定位问题
+
+## Phase 12: M2 平台能力补齐（商店/权限/文件只读）
+**Type**: Product + API  
+**Estimated**: 6 小时  
+**Files**: `control-plane/src/repositories/postgres-rbac-repository.ts`, `control-plane/src/routes/apps.ts`, `control-plane/src/routes/files.ts`, `control-plane/src/services/file-browser.ts`, `control-plane/test/e2e/apps-files-rbac.e2e.test.ts`
+
+**Tasks**:
+- [x] 增加 RBAC 仓储抽象与 InMemory/Postgres 双实现
+- [x] 新增应用商店可见/可用接口（`GET /api/apps/store`）
+- [x] 新增文件只读树与下载接口（`GET /api/files/tree|download`）
+- [x] 增加文件访问审计日志记录
+- [x] 补齐 RBAC + Apps + Files 端到端测试
+- [x] 补充 RBAC/ACL 数据库迁移脚本 `002_rbac_and_file_acl.sql`
+
+**Verification Criteria**:
+- [x] `npm run build` 通过
+- [x] `npm test` 通过（新增 apps-files-rbac E2E）
+- [x] `RUN_REAL_E2E=1` 时真实依赖用例仍通过（无回归）
+
+**Exit Criteria**:
+- M2 基础能力可用：应用商店可见/可用判定、文件只读访问与审计

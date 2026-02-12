@@ -133,13 +133,13 @@
 - `control-plane/test/e2e/apps-files-rbac.e2e.test.ts`（新增）
 
 **Tasks**:
-- [ ] 最小 RBAC（users/departments/roles/bindings）。
-- [ ] 应用商店可见/可用策略接口。
-- [ ] 文件树浏览与下载（只读）。
+- [x] 最小 RBAC（users/departments/roles/bindings）。
+- [x] 应用商店可见/可用策略接口。
+- [x] 文件树浏览与下载（只读）。
 
 **Verification Criteria**:
-- [ ] 未授权用户不可见/不可用目标 app。
-- [ ] 文件读取行为全链路审计可追溯。
+- [x] 未授权用户不可见/不可用目标 app。
+- [x] 文件读取行为全链路审计可追溯。
 
 **Exit Criteria**:
 - 达成 M2 基础可运营门槛。
@@ -151,8 +151,8 @@
 2. Phase 9（已完成）
 3. Phase 10（已完成）
 4. Phase 11（已完成）
-5. Phase 12
+5. Phase 12（已完成）
 
 ## 当前阶段
-- `in_progress`: Phase 12
+- `in_progress`: 扩展迭代待定
 - `next_commit`: `feat(phase-12): add rbac app-store and readonly files apis`
