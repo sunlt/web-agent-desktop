@@ -307,4 +307,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 17（前端 E2E 基线 + 工作台剩余能力补齐）
-- `next_commit`: `feat(phase-17): add run-level reconcile alerts and metrics output`
+- `next_commit`: `feat(phase-18): scaffold gateway and observability split`

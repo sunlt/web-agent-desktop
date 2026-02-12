@@ -82,6 +82,39 @@ describe("Reconcile API E2E", () => {
         skipped: 0,
         failed: 0,
       });
+
+      const metrics = await fetch(`${baseUrl}/api/reconcile/metrics?alertLimit=10`);
+      expect(metrics.status).toBe(200);
+      const metricsBody = (await metrics.json()) as {
+        staleRuns: {
+          runs: number;
+          total: number;
+          retried: number;
+          failed: number;
+        };
+        staleSync: {
+          runs: number;
+          total: number;
+          succeeded: number;
+          skipped: number;
+          failed: number;
+        };
+        alerts: Array<{ type: string }>;
+      };
+      expect(metricsBody.staleRuns).toMatchObject({
+        runs: 1,
+        total: 1,
+        retried: 1,
+        failed: 0,
+      });
+      expect(metricsBody.staleSync).toMatchObject({
+        runs: 1,
+        total: 1,
+        succeeded: 1,
+        skipped: 0,
+        failed: 0,
+      });
+      expect(metricsBody.alerts).toEqual([]);
     });
 
     const run = await runQueueRepository.findByRunId(runId);
@@ -150,6 +183,29 @@ describe("Reconcile API E2E", () => {
         expired: 1,
         failedRuns: 1,
       });
+
+      const metrics = await fetch(`${baseUrl}/api/reconcile/metrics?alertLimit=10`);
+      expect(metrics.status).toBe(200);
+      const metricsBody = (await metrics.json()) as {
+        humanLoopTimeout: {
+          runs: number;
+          pending: number;
+          expired: number;
+          failedRuns: number;
+        };
+        alerts: Array<{ type: string; level: string }>;
+      };
+      expect(metricsBody.humanLoopTimeout).toMatchObject({
+        runs: 1,
+        pending: 2,
+        expired: 1,
+        failedRuns: 1,
+      });
+      expect(
+        metricsBody.alerts.some(
+          (item) => item.type === "human_loop_timeout" && item.level === "warn",
+        ),
+      ).toBe(true);
     });
 
     const stale = callbackRepository.getHumanLoopRequest("q-reconcile-human-loop-stale");
