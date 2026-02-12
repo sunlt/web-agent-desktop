@@ -139,6 +139,69 @@
         font-size: 11px;
         color: var(--muted);
       }
+      .panel-title {
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      #todo-status {
+        min-height: 16px;
+      }
+      #todo-groups {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .todo-group {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px;
+        background: #11161d;
+      }
+      .todo-group-title {
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .todo-item {
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 3px 0;
+      }
+      .todo-item-content {
+        flex: 1;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+      }
+      .todo-order {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      #todo-events {
+        margin-top: 6px;
+        max-height: 160px;
+        overflow: auto;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #0d1117;
+        padding: 6px;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+      .todo-event {
+        display: flex;
+        gap: 8px;
+      }
+      .todo-event-time {
+        color: var(--muted);
+        min-width: 70px;
+      }
+      .todo-event-text {
+        flex: 1;
+      }
       main {
         background: #000;
         position: relative;
@@ -200,6 +263,27 @@
             "
           />
           <div id="sessions"></div>
+          <hr
+            style="
+              border: none;
+              border-top: 1px solid var(--border);
+              margin: 4px 0;
+            "
+          />
+          <div class="panel-title">Run Todo</div>
+          <div class="row">
+            <input id="run-id" placeholder="runId" />
+            <button id="load-todo" class="secondary">查询</button>
+          </div>
+          <div class="row">
+            <button id="toggle-auto-refresh" class="secondary">
+              自动刷新: 关
+            </button>
+          </div>
+          <div id="todo-status" class="muted"></div>
+          <div id="todo-summary" class="muted"></div>
+          <div id="todo-groups"></div>
+          <div id="todo-events"></div>
         </div>
       </aside>
       <main>
@@ -213,10 +297,19 @@
       const terminal = document.getElementById("terminal");
       const nameInput = document.getElementById("name");
       const statusEl = document.getElementById("status");
+      const runIdInput = document.getElementById("run-id");
+      const loadTodoBtn = document.getElementById("load-todo");
+      const toggleAutoRefreshBtn = document.getElementById("toggle-auto-refresh");
+      const todoStatusEl = document.getElementById("todo-status");
+      const todoSummaryEl = document.getElementById("todo-summary");
+      const todoGroupsEl = document.getElementById("todo-groups");
+      const todoEventsEl = document.getElementById("todo-events");
       const layout = document.getElementById("layout");
       const btnToggleSidebar = document.getElementById("btn-toggle-sidebar");
       let active = "";
       let sidebarCollapsed = localStorage.getItem("tmux.sidebar-collapsed") === "1";
+      let todoAutoRefresh = false;
+      let todoAutoRefreshTimer = null;
 
       function syncSidebarState() {
         layout.classList.toggle("sidebar-collapsed", sidebarCollapsed);
@@ -226,6 +319,10 @@
 
       function setStatus(text) {
         statusEl.textContent = text || "";
+      }
+
+      function setTodoStatus(text) {
+        todoStatusEl.textContent = text || "";
       }
 
       function renderSessions(list) {
@@ -262,6 +359,153 @@
         } catch {
           setStatus("加载失败，稍后重试");
         }
+      }
+
+      function escapeHtml(input) {
+        return String(input || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function formatTime(ts) {
+        if (!ts) return "--:--:--";
+        const date = new Date(ts);
+        if (Number.isNaN(date.getTime())) return "--:--:--";
+        return date.toLocaleTimeString("zh-CN", {
+          hour12: false,
+        });
+      }
+
+      function todoGroupOrder(status) {
+        switch (status) {
+          case "doing":
+            return 0;
+          case "todo":
+            return 1;
+          case "done":
+            return 2;
+          case "canceled":
+            return 3;
+          default:
+            return 4;
+        }
+      }
+
+      function renderTodoItems(items) {
+        if (!Array.isArray(items) || items.length === 0) {
+          todoGroupsEl.innerHTML = '<div class="muted">暂无 Todo。</div>';
+          return;
+        }
+
+        const groups = new Map();
+        items.forEach((item) => {
+          const status = item.status || "todo";
+          if (!groups.has(status)) groups.set(status, []);
+          groups.get(status).push(item);
+        });
+
+        const sortedStatuses = [...groups.keys()].sort(
+          (a, b) => todoGroupOrder(a) - todoGroupOrder(b),
+        );
+
+        todoGroupsEl.innerHTML = sortedStatuses
+          .map((status) => {
+            const lines = groups
+              .get(status)
+              .slice()
+              .sort((a, b) => (a.order || 0) - (b.order || 0))
+              .map(
+                (item) => `
+                  <div class="todo-item">
+                    <div class="todo-item-content">${escapeHtml(item.content)}</div>
+                    <div class="todo-order">#${item.order || 0}</div>
+                  </div>
+                `,
+              )
+              .join("");
+            return `
+              <div class="todo-group">
+                <div class="todo-group-title">${escapeHtml(status)} · ${groups.get(status).length}</div>
+                ${lines}
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      function renderTodoEvents(events) {
+        if (!Array.isArray(events) || events.length === 0) {
+          todoEventsEl.innerHTML = '<div class="muted">暂无 Todo 事件。</div>';
+          return;
+        }
+
+        const latest = events.slice(-40);
+        todoEventsEl.innerHTML = latest
+          .map(
+            (event) => `
+              <div class="todo-event">
+                <div class="todo-event-time">${formatTime(event.eventTs)}</div>
+                <div class="todo-event-text">${escapeHtml(event.status)} · ${escapeHtml(event.content)}</div>
+              </div>
+            `,
+          )
+          .join("");
+      }
+
+      async function loadRunTodos() {
+        const runId = runIdInput.value.trim();
+        if (!runId) {
+          setTodoStatus("请输入 runId");
+          return;
+        }
+
+        setTodoStatus("加载 Todo 中...");
+        try {
+          const [itemsRes, eventsRes] = await Promise.all([
+            fetch(`/api/runs/${encodeURIComponent(runId)}/todos?limit=200`, {
+              cache: "no-store",
+            }),
+            fetch(`/api/runs/${encodeURIComponent(runId)}/todos/events?limit=200`, {
+              cache: "no-store",
+            }),
+          ]);
+
+          if (!itemsRes.ok || !eventsRes.ok) {
+            setTodoStatus("Todo 查询失败，请检查 runId 或后端状态");
+            return;
+          }
+
+          const itemsData = await itemsRes.json();
+          const eventsData = await eventsRes.json();
+          const items = itemsData.items || [];
+          const events = eventsData.events || [];
+
+          todoSummaryEl.textContent = `runId: ${runId} · items: ${items.length} · events: ${events.length}`;
+          renderTodoItems(items);
+          renderTodoEvents(events);
+          setTodoStatus("");
+        } catch {
+          setTodoStatus("Todo 查询失败，请稍后重试");
+        }
+      }
+
+      function syncTodoAutoRefresh() {
+        if (todoAutoRefreshTimer) {
+          clearInterval(todoAutoRefreshTimer);
+          todoAutoRefreshTimer = null;
+        }
+
+        if (todoAutoRefresh) {
+          todoAutoRefreshTimer = setInterval(() => {
+            if (!runIdInput.value.trim()) return;
+            loadRunTodos();
+          }, 5000);
+        }
+
+        toggleAutoRefreshBtn.textContent = `自动刷新: ${todoAutoRefresh ? "开" : "关"}`;
       }
 
       function openSession(name) {
@@ -330,11 +574,20 @@
       document.getElementById("create").onclick = createSession;
       document.getElementById("refresh").onclick = loadSessions;
       document.getElementById("remove").onclick = deleteSession;
+      loadTodoBtn.onclick = loadRunTodos;
+      toggleAutoRefreshBtn.onclick = () => {
+        todoAutoRefresh = !todoAutoRefresh;
+        syncTodoAutoRefresh();
+      };
       nameInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") createSession();
       });
+      runIdInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") loadRunTodos();
+      });
 
       syncSidebarState();
+      syncTodoAutoRefresh();
       loadSessions();
     </script>
   </body>
