@@ -285,7 +285,7 @@
 - [x] 前端流式稳定性：断线重连、游标恢复、异常态提示一致性已完成。
 
 **Verification Criteria**:
-- [ ] 前端 E2E 覆盖核心路径并通过 CI。
+- [x] 前端 E2E 覆盖核心路径并通过 CI（`.github/workflows/ci.yml` 已接入 `portal` Playwright）。
 - [ ] 真实环境联调（compose + external executor）下可稳定完成完整对话闭环。
 
 **Exit Criteria**:
@@ -346,4 +346,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 18（网关/BFF 与部署边界拆分）
-- `next_commit`: `feat(phase-19): align advanced workspace interactions with design`
+- `next_commit`: `test(phase-19): stabilize full conversation real-env e2e`

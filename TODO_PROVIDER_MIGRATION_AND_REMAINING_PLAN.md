@@ -138,6 +138,7 @@
 ## B. 中优先级（平台可用性）
 
 - [x] 前端工作台已重构为 React + TS + Vite，并接入 ChatUI + Todo + Human-loop（tmux 面板废弃）。
+- [x] 前端 Playwright E2E 已接入 CI（`.github/workflows/ci.yml`）。
 - [x] 文件域已接入写能力（上传/重命名/删除/在线编辑）并补齐审计闭环。
 - [x] `waiting_human` 超时策略与取消策略已落地（设计 24.3）：新增 `POST /api/reconcile/human-loop-timeout`，并在 `POST /api/runs/:runId/stop` 时批量将 pending 请求置为 `canceled`。
 - [x] run-level 对账/修复补齐告警出口与指标看板：新增 `GET /api/reconcile/metrics`（聚合计数 + recent alerts），并覆盖 E2E。
