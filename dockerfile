@@ -1,3 +1,15 @@
+FROM docker.m.daocloud.io/library/node:22-trixie AS executor-build
+
+WORKDIR /opt/executor
+
+COPY executor/package*.json ./
+RUN npm ci
+
+COPY executor/tsconfig.json ./tsconfig.json
+COPY executor/src ./src
+
+RUN npm run build && npm prune --omit=dev
+
 FROM docker.m.daocloud.io/library/node:22-trixie
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -144,19 +156,15 @@ RUN cat > /etc/fonts/local.conf <<'EOF'
 EOF
 
 # -----------------------
-# 6) 入口脚本
+# 6) 集成 executor 服务运行时
 # -----------------------
-COPY scripts/start-agent-runtime.sh /usr/local/bin/start-agent-runtime
-COPY scripts/ttyd-tmux.sh /usr/local/bin/ttyd-tmux
-COPY scripts/tmux-api.py /usr/local/bin/tmux-api
-RUN chmod +x /usr/local/bin/start-agent-runtime /usr/local/bin/ttyd-tmux /usr/local/bin/tmux-api
+COPY --from=executor-build /opt/executor/package.json /opt/executor/package.json
+COPY --from=executor-build /opt/executor/package-lock.json /opt/executor/package-lock.json
+COPY --from=executor-build /opt/executor/node_modules /opt/executor/node_modules
+COPY --from=executor-build /opt/executor/dist /opt/executor/dist
 
-# -----------------------
-# 9) /root 外部挂载目录
-# -----------------------
-VOLUME ["/root"]
-WORKDIR /root
+WORKDIR /opt/executor
 
-EXPOSE 4096 7681
+EXPOSE 8090
 
-CMD ["/usr/local/bin/start-agent-runtime"]
+CMD ["node", "dist/server.js"]

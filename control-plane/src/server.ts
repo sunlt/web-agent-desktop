@@ -30,7 +30,7 @@ const rbacRepository = pool
 const dockerClient = useDockerCli
   ? new DockerCliClient({
       containerImage:
-        process.env.EXECUTOR_CONTAINER_IMAGE ?? "agent-runtime:latest",
+        process.env.EXECUTOR_CONTAINER_IMAGE ?? "executor:latest",
       containerCommand: parseCommand(
         process.env.EXECUTOR_CONTAINER_COMMAND_JSON,
       ),

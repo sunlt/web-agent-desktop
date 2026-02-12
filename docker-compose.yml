@@ -17,7 +17,7 @@ services:
       - EXECUTOR_MAX_RETRIES=1
       - EXECUTOR_RETRY_DELAY_MS=200
       - EXECUTOR_RETRY_STATUS_CODES=500,502,503,504
-      - EXECUTOR_CONTAINER_IMAGE=agent-runtime:latest
+      - EXECUTOR_CONTAINER_IMAGE=executor:latest
       - EXECUTOR_CONTAINER_NETWORK=agent-network
       - PGHOST=pgsql
       - PGPORT=5432
@@ -28,7 +28,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - pgsql
-      - agent-runtime
       - executor
     networks:
       - agent-network
@@ -36,8 +35,8 @@ services:
 
   executor:
     build:
-      context: ./executor
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./dockerfile
     image: executor:latest
     container_name: executor
     ports:
@@ -52,30 +51,10 @@ services:
       - EXECUTOR_S3_ACCESS_KEY=rustfsadmin
       - EXECUTOR_S3_SECRET_KEY=rustfsadmin
       - EXECUTOR_S3_BUCKET=app
+    volumes:
+      - executor_workspace:/tmp/executor-workspaces
     depends_on:
       - rustfs
-    networks:
-      - agent-network
-    restart: always
-
-  agent-runtime:
-    build:
-      context: .
-      dockerfile: ./dockerfile
-    image: agent-runtime:latest
-    container_name: agent-runtime
-    ports:
-      - "4096:4096"
-    volumes:
-      - agent_runtime_data:/data
-      - agent_runtime_home:/root
-    environment:
-      - HTTP_PROXY=http://mihomo:7890
-      - HTTPS_PROXY=http://mihomo:7890
-      - ALL_PROXY=socks5://mihomo:7890
-      - http_proxy=http://mihomo:7890
-      - https_proxy=http://mihomo:7890
-      - all_proxy=socks5://mihomo:7890
     networks:
       - agent-network
     restart: always
@@ -104,9 +83,7 @@ services:
       - --config=/config/settings.json
       - --baseurl=/file-manager
     volumes:
-      - agent_runtime_srv:/srv
-      - agent_runtime_home:/srv/home
-      - agent_runtime_data:/srv/data
+      - executor_workspace:/srv/executor-workspaces
       - filebrowser_db:/database
       - filebrowser_config:/config
     networks:
@@ -169,8 +146,6 @@ networks:
 volumes:
   filebrowser_db:
   filebrowser_config:
-  agent_runtime_data:
-  agent_runtime_home:
-  agent_runtime_srv:
+  executor_workspace:
   pgsql_data:
   rustfs_data:
