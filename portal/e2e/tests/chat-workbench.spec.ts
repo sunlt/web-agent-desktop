@@ -89,6 +89,13 @@ type MockApiState = {
   fileWrites?: Array<{ path: string; content: string }>;
   storeApps?: StoreApp[];
   runStartPayloads?: Array<Record<string, unknown>>;
+  replyResultByQuestion?: Record<
+    string,
+    {
+      duplicate?: boolean;
+      status?: string;
+    }
+  >;
 };
 
 test.describe("Portal Chat Workbench", () => {
@@ -335,7 +342,7 @@ test.describe("Portal Chat Workbench", () => {
           prompt: "请选择部署环境",
           metadata: { choices: ["staging", "prod"] },
           status: "pending",
-          requestedAt: now,
+          requestedAt: "2026-02-10T10:00:00.000Z",
           resolvedAt: null,
         },
       ],
@@ -405,6 +412,7 @@ test.describe("Portal Chat Workbench", () => {
     const pendingCard = page.locator(".pending-card").first();
     await expect(pendingCard).toContainText("q-1");
     await expect(pendingCard).toContainText("请选择部署环境");
+    await expect(pendingCard).toContainText("仅提示，不自动完成");
 
     await pendingCard.getByRole("textbox").fill("使用 staging 环境");
     await pendingCard.getByRole("button", { name: "提交回复" }).click();
@@ -419,6 +427,100 @@ test.describe("Portal Chat Workbench", () => {
         answer: "使用 staging 环境",
       },
     ]);
+  });
+
+  test("human-loop 重复回复显示幂等提示且不自动完成", async ({ page }) => {
+    const runId = "run-e2e-dup-1";
+    const now = "2026-02-12T14:50:00.000Z";
+
+    const mockState: MockApiState = {
+      runId,
+      pendingRequests: [
+        {
+          questionId: "q-dup",
+          runId,
+          sessionId: "sess-dup",
+          prompt: "请确认参数",
+          metadata: {},
+          status: "pending",
+          requestedAt: "2026-02-10T10:00:00.000Z",
+          resolvedAt: null,
+        },
+      ],
+      todoItems: [],
+      todoEvents: [],
+      replyPayloads: [],
+      historyChats: [
+        {
+          chatId: "chat-e2e-dup-1",
+          sessionId: "chat-e2e-dup-1",
+          title: "会话 dup",
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+          createdAt: now,
+          updatedAt: now,
+          lastMessageAt: null,
+        },
+      ],
+      historyMessages: {
+        "chat-e2e-dup-1": [],
+      },
+      sseBody: buildSseBody([
+        {
+          event: "run.status",
+          data: {
+            type: "run.status",
+            runId,
+            provider: "codex-cli",
+            status: "started",
+            ts: now,
+          },
+        },
+        {
+          event: "message.delta",
+          data: {
+            type: "message.delta",
+            runId,
+            provider: "codex-cli",
+            text: "需要确认参数。",
+            ts: now,
+          },
+        },
+        {
+          event: "run.status",
+          data: {
+            type: "run.status",
+            runId,
+            provider: "codex-cli",
+            status: "finished",
+            detail: "succeeded",
+            ts: now,
+          },
+        },
+        {
+          event: "run.closed",
+          data: { runId },
+        },
+      ]),
+      replyResultByQuestion: {
+        "q-dup": {
+          duplicate: true,
+          status: "resolved",
+        },
+      },
+    };
+
+    await mockPortalApi(page, mockState);
+    await page.goto("/");
+    await page.getByPlaceholder("输入消息，Enter 发送，Shift+Enter 换行").fill("继续执行");
+    await page.getByRole("button", { name: "发送" }).click();
+
+    const pendingCard = page.locator(".pending-card").first();
+    await pendingCard.getByRole("textbox").fill("参数确认");
+    await pendingCard.getByRole("button", { name: "提交回复" }).click();
+
+    await expect(pendingCard).toContainText("该问题已处理（幂等返回）");
+    await expect(pendingCard).toContainText("请确认参数");
   });
 
   test("Files 面板支持读取与保存文本文件", async ({ page }) => {
@@ -502,6 +604,7 @@ async function mockPortalApi(page: Page, state: MockApiState): Promise<void> {
   state.fileWrites ??= [];
   state.storeApps ??= [];
   state.runStartPayloads ??= [];
+  state.replyResultByQuestion ??= {};
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -885,15 +988,22 @@ async function mockPortalApi(page: Page, state: MockApiState): Promise<void> {
         questionId: string;
         answer: string;
       };
+      const replyPreset = state.replyResultByQuestion[payload.questionId] ?? null;
       state.replyPayloads.push(payload);
-      state.pendingRequests = state.pendingRequests.filter(
-        (requestItem) => requestItem.questionId !== payload.questionId,
-      );
+      if (!replyPreset?.duplicate) {
+        state.pendingRequests = state.pendingRequests.filter(
+          (requestItem) => requestItem.questionId !== payload.questionId,
+        );
+      }
 
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ ok: true, status: "resolved", duplicate: false }),
+        body: JSON.stringify({
+          ok: true,
+          status: replyPreset?.status ?? "resolved",
+          duplicate: replyPreset?.duplicate ?? false,
+        }),
       });
     }
 

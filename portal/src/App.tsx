@@ -192,6 +192,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(
 const POLL_MS = 3500;
 const MAX_TIMELINE = 200;
 const FILE_READ_LIMIT = 256 * 1024;
+const HUMAN_LOOP_TIMEOUT_MS = 5 * 60 * 1000;
 
 const DEFAULT_MODEL: Record<ProviderKind, string> = {
   "codex-cli": "gpt-5.1-codex",
@@ -218,9 +219,11 @@ export default function App() {
   const [pendingRequests, setPendingRequests] = useState<HumanLoopRequest[]>([]);
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
   const [replying, setReplying] = useState<Record<string, boolean>>({});
+  const [replyFeedback, setReplyFeedback] = useState<Record<string, string>>({});
 
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [errorText, setErrorText] = useState<string>("");
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const [fileUserId, setFileUserId] = useState<string>("u-alice");
   const [storeApps, setStoreApps] = useState<StoreAppItem[]>([]);
   const [storeStatus, setStoreStatus] = useState<StoreStatus>("idle");
@@ -273,6 +276,28 @@ export default function App() {
     }
     runConfigRef.current = baseConfig;
   }, [provider, model, requireHumanLoop, activeAppId]);
+
+  useEffect(() => {
+    if (pendingRequests.length === 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setNowTick(Date.now());
+    }, 15_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [pendingRequests.length]);
+
+  useEffect(() => {
+    setReplyFeedback((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(([questionId]) =>
+          pendingRequests.some((request) => request.questionId === questionId),
+        ),
+      ),
+    );
+  }, [pendingRequests]);
 
   const groupedTodos = useMemo(() => {
     const base: Record<TodoStatus, TodoItem[]> = {
@@ -1141,9 +1166,18 @@ export default function App() {
 
       setReplying((prev) => ({ ...prev, [request.questionId]: true }));
       setErrorText("");
+      setReplyFeedback((prev) => {
+        const next = { ...prev };
+        delete next[request.questionId];
+        return next;
+      });
 
       try {
-        await fetchJson<{ ok: boolean; status?: string; duplicate?: boolean }>(
+        const replyResult = await fetchJson<{
+          ok: boolean;
+          status?: string;
+          duplicate?: boolean;
+        }>(
           "/human-loop/reply",
           {
             method: "POST",
@@ -1158,12 +1192,26 @@ export default function App() {
           },
         );
 
+        if (replyResult.duplicate) {
+          setReplyFeedback((prev) => ({
+            ...prev,
+            [request.questionId]: "该问题已处理（幂等返回），无需重复提交。",
+          }));
+          appendTimeline(`human-loop duplicate: ${request.questionId}`);
+          await refreshRunPanels(request.runId);
+          return;
+        }
+
         setAnswerDrafts((prev) => {
           const next = { ...prev };
           delete next[request.questionId];
           return next;
         });
 
+        setReplyFeedback((prev) => ({
+          ...prev,
+          [request.questionId]: "回复已提交，等待 run 继续。",
+        }));
         appendTimeline(`human-loop resolved: ${request.questionId}`);
         await refreshRunPanels(request.runId);
       } catch (error) {
@@ -1437,36 +1485,52 @@ export default function App() {
               <p className="muted">当前无待回复问题</p>
             ) : (
               <div className="pending-list">
-                {pendingRequests.map((request) => (
-                  <article key={request.questionId} className="pending-card">
-                    <header>
-                      <strong>{request.questionId}</strong>
-                      <time>{formatTime(request.requestedAt)}</time>
-                    </header>
-                    <p>{request.prompt}</p>
-                    <textarea
-                      placeholder="输入回复"
-                      value={answerDrafts[request.questionId] ?? ""}
-                      onChange={(e) =>
-                        setAnswerDrafts((prev) => ({
-                          ...prev,
-                          [request.questionId]: e.target.value,
-                        }))
-                      }
-                      rows={2}
-                    />
-                    <button
-                      type="button"
-                      disabled={
-                        replying[request.questionId] === true ||
-                        !(answerDrafts[request.questionId] ?? "").trim()
-                      }
-                      onClick={() => void handleReply(request)}
+                {pendingRequests.map((request) => {
+                  const timeoutState = resolveHumanLoopTimeoutState(request, nowTick);
+                  return (
+                    <article
+                      key={request.questionId}
+                      className={`pending-card ${timeoutState.timedOut ? "timeout" : ""}`}
                     >
-                      {replying[request.questionId] ? "提交中..." : "提交回复"}
-                    </button>
-                  </article>
-                ))}
+                      <header>
+                        <strong>{request.questionId}</strong>
+                        <time>{formatTime(request.requestedAt)}</time>
+                      </header>
+                      <p>{request.prompt}</p>
+                      <p
+                        className={`human-loop-timeout ${timeoutState.timedOut ? "warning" : ""}`}
+                      >
+                        {timeoutState.text}
+                      </p>
+                      <textarea
+                        placeholder="输入回复"
+                        value={answerDrafts[request.questionId] ?? ""}
+                        onChange={(e) =>
+                          setAnswerDrafts((prev) => ({
+                            ...prev,
+                            [request.questionId]: e.target.value,
+                          }))
+                        }
+                        rows={2}
+                      />
+                      {replyFeedback[request.questionId] ? (
+                        <p className="human-loop-feedback">
+                          {replyFeedback[request.questionId]}
+                        </p>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={
+                          replying[request.questionId] === true ||
+                          !(answerDrafts[request.questionId] ?? "").trim()
+                        }
+                        onClick={() => void handleReply(request)}
+                      >
+                        {replying[request.questionId] ? "提交中..." : "提交回复"}
+                      </button>
+                    </article>
+                  );
+                })}
               </div>
             )}
           </section>
@@ -2122,6 +2186,83 @@ function uint8ArrayToBase64(input: Uint8Array): string {
     binary += String.fromCharCode(item);
   }
   return btoa(binary);
+}
+
+function resolveHumanLoopTimeoutState(
+  request: HumanLoopRequest,
+  nowMs: number,
+): {
+  timedOut: boolean;
+  text: string;
+} {
+  const requestedMs = new Date(request.requestedAt).getTime();
+  if (!Number.isFinite(requestedMs)) {
+    return {
+      timedOut: false,
+      text: "等待中",
+    };
+  }
+
+  const deadlineMs = resolveHumanLoopDeadlineMs(request, requestedMs);
+  const remainingMs = deadlineMs - nowMs;
+  if (remainingMs <= 0) {
+    return {
+      timedOut: true,
+      text: `已超时 ${formatDuration(Math.abs(remainingMs))}（仅提示，不自动完成）`,
+    };
+  }
+
+  return {
+    timedOut: false,
+    text: `剩余 ${formatDuration(remainingMs)}`,
+  };
+}
+
+function resolveHumanLoopDeadlineMs(
+  request: HumanLoopRequest,
+  requestedMs: number,
+): number {
+  const metadata = request.metadata;
+  const deadlineAt = asString(metadata.deadlineAt);
+  if (deadlineAt) {
+    const deadlineMs = new Date(deadlineAt).getTime();
+    if (Number.isFinite(deadlineMs)) {
+      return deadlineMs;
+    }
+  }
+
+  const timeoutMs = asNumber(metadata.timeoutMs);
+  if (timeoutMs && timeoutMs > 0) {
+    return requestedMs + timeoutMs;
+  }
+
+  return requestedMs + HUMAN_LOOP_TIMEOUT_MS;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h${minutes.toString().padStart(2, "0")}m`;
+  }
+  return `${minutes}m${seconds.toString().padStart(2, "0")}s`;
 }
 
 function formatTime(value: string): string {

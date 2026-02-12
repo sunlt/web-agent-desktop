@@ -1121,3 +1121,55 @@
 
 ### next_phase
 - Phase 17 后续子阶段：human-loop 体验增强（超时/幂等反馈/resolved 历史）+ 流式断线重连与 cursor 恢复。
+
+---
+
+## Phase 17: Human-loop UX（超时提示 + 幂等反馈）
+
+### objective
+- 改善 Human-loop 交互体验：提供超时可视提示，但不自动完成；对重复回复返回提供幂等反馈提示。
+
+### inputs
+- 现有前端仅展示 pending 问题与回复输入，不含超时提示与 duplicate 反馈。
+- 用户明确要求“可以有超时提示，但不要自动完成”。
+
+### actions
+- 前端 `portal`：
+  - 增加 Human-loop 超时状态计算：
+    - 默认超时阈值 `5min`（支持 metadata `deadlineAt` / `timeoutMs` 覆盖）。
+    - 卡片展示 `剩余 xx` 或 `已超时 xx（仅提示，不自动完成）`。
+    - 超时卡片仅变更样式，不触发自动 resolved/移除。
+  - 增加回复反馈：
+    - `POST /api/human-loop/reply` 返回 `duplicate=true` 时，展示“已处理（幂等返回）”提示，并保留卡片。
+    - 常规成功回复展示“回复已提交，等待 run 继续”反馈。
+  - 增加周期 tick（15s）刷新超时提示文本。
+  - 增加对应样式（超时态边框/提示文案）。
+- 测试补齐：
+  - Playwright 断言 pending 卡片出现“仅提示，不自动完成”文案。
+  - 新增 duplicate 反馈用例，验证卡片不自动消失且提示文案正确。
+  - mock API 扩展 duplicate 回包能力。
+
+### outputs
+- `portal/src/App.tsx`
+- `portal/src/styles.css`
+- `portal/e2e/tests/chat-workbench.spec.ts`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `cd portal && npm run build`
+  - `cd portal && npm test`
+  - `cd control-plane && npm test`
+- results:
+  - portal 构建通过。
+  - Playwright 5/5 通过（新增 2 条 human-loop UX 相关断言）。
+  - control-plane 测试通过（无回归）。
+
+### gate_result
+- **Pass**（human-loop 超时提示与幂等反馈已可用，且不自动完成）
+
+### risks
+- 当前仍缺 `resolved` 历史回看面板/接口，完整 human-loop 体验尚未闭环。
+
+### next_phase
+- Phase 17 后续子阶段：human-loop resolved 历史回看 + 流式断线重连与 cursor 恢复。

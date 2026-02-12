@@ -462,6 +462,11 @@ button.secondary {
   gap: 7px;
 }
 
+.pending-card.timeout {
+  border-color: #e6a64b;
+  background: #fff7ea;
+}
+
 .pending-card header {
   display: flex;
   justify-content: space-between;
@@ -471,6 +476,21 @@ button.secondary {
 .pending-card p {
   margin: 0;
   font-size: 13px;
+}
+
+.human-loop-timeout {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.human-loop-timeout.warning {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.human-loop-feedback {
+  font-size: 12px;
+  color: var(--primary-strong);
 }
 
 .store-controls {
