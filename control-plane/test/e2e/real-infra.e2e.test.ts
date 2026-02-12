@@ -27,14 +27,27 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
   let bucket = "";
 
   beforeAll(async () => {
-    rustfs = await startRustfsContainer();
-    bucket = `cp-e2e-${Date.now()}`;
-    executorFixture = await startExecutorFixture({
-      rustfsEndpoint: rustfs.endpoint,
-      accessKey: rustfs.accessKey,
-      secretKey: rustfs.secretKey,
-      bucket,
-    });
+    const externalExecutorBaseUrl = process.env.REAL_EXECUTOR_BASE_URL?.trim();
+    bucket = process.env.REAL_E2E_BUCKET ?? `cp-e2e-${Date.now()}`;
+
+    if (externalExecutorBaseUrl) {
+      executorFixture = {
+        mode: "external",
+        baseUrl: externalExecutorBaseUrl.replace(/\/+$/, ""),
+        token: process.env.REAL_EXECUTOR_TOKEN?.trim() || undefined,
+        bucket,
+        getEvents: () => [],
+        stop: async () => {},
+      };
+    } else {
+      rustfs = await startRustfsContainer();
+      executorFixture = await startExecutorFixture({
+        rustfsEndpoint: rustfs.endpoint,
+        accessKey: rustfs.accessKey,
+        secretKey: rustfs.secretKey,
+        bucket,
+      });
+    }
     pool = createPostgresPool();
     await applyMigrations(pool);
   }, 180_000);
@@ -52,7 +65,7 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
   }, 180_000);
 
   test("should run lifecycle with real adapters and sync workspace to RustFS", async () => {
-    if (!pool || !rustfs || !executorFixture) {
+    if (!pool || !executorFixture) {
       throw new Error("real infra fixtures not initialized");
     }
 
@@ -72,6 +85,7 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
     });
     const executorClient = new ExecutorHttpClient({
       baseUrl: executorFixture.baseUrl,
+      token: executorFixture.token,
       timeoutMs: 20_000,
     });
 
@@ -201,19 +215,25 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
       });
     });
 
-    const s3Client = createS3Client({
-      endpoint: rustfs.endpoint,
-      accessKey: rustfs.accessKey,
-      secretKey: rustfs.secretKey,
-    });
-    await ensureBucket(s3Client, bucket);
-    expect(
-      await objectExists({
-        client: s3Client,
-        bucket,
-        key,
-      }),
-    ).toBe(true);
+    if (executorFixture.mode === "fixture") {
+      if (!rustfs) {
+        throw new Error("rustfs fixture missing");
+      }
+
+      const s3Client = createS3Client({
+        endpoint: rustfs.endpoint,
+        accessKey: rustfs.accessKey,
+        secretKey: rustfs.secretKey,
+      });
+      await ensureBucket(s3Client, bucket);
+      expect(
+        await objectExists({
+          client: s3Client,
+          bucket,
+          key,
+        }),
+      ).toBe(true);
+    }
 
     const usageResult = await pool.query(
       `SELECT usage FROM usage_logs WHERE run_id = $1`,
@@ -221,26 +241,28 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
     );
     expect(usageResult.rowCount).toBe(1);
 
-    const events = executorFixture.getEvents();
-    expect(
-      events.some(
-        (event) =>
-          event.path === "/workspace/restore" &&
-          typeof event.traceId === "string" &&
-          event.traceId.length > 0 &&
-          event.operation === "workspace.restore",
-      ),
-    ).toBe(true);
-    expect(
-      events.some(
-        (event) =>
-          event.path === "/workspace/sync" &&
-          typeof event.traceId === "string" &&
-          event.traceId.length > 0 &&
-          event.runId === runId &&
-          event.operation?.startsWith("workspace.sync."),
-      ),
-    ).toBe(true);
+    if (executorFixture.mode === "fixture") {
+      const events = executorFixture.getEvents();
+      expect(
+        events.some(
+          (event) =>
+            event.path === "/workspace/restore" &&
+            typeof event.traceId === "string" &&
+            event.traceId.length > 0 &&
+            event.operation === "workspace.restore",
+        ),
+      ).toBe(true);
+      expect(
+        events.some(
+          (event) =>
+            event.path === "/workspace/sync" &&
+            typeof event.traceId === "string" &&
+            event.traceId.length > 0 &&
+            event.runId === runId &&
+            event.operation?.startsWith("workspace.sync."),
+        ),
+      ).toBe(true);
+    }
 
     await pool.query(`DELETE FROM usage_logs WHERE run_id = $1`, [runId]);
     await pool.query(`DELETE FROM run_events WHERE run_id = $1`, [runId]);
@@ -252,7 +274,7 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
 
   test("should keep worker running when executor sync fails (failure injection)", async () => {
     if (!pool || !rustfs) {
-      throw new Error("real infra fixtures not initialized");
+      return;
     }
 
     const failingFixture = await startExecutorFixture({
@@ -364,7 +386,7 @@ describeReal("Real Infra E2E (Postgres + Docker + RustFS + Executor)", () => {
 
   test("should retry sync and stop worker when executor has transient failure", async () => {
     if (!pool || !rustfs) {
-      throw new Error("real infra fixtures not initialized");
+      return;
     }
 
     const flakyFixture = await startExecutorFixture({

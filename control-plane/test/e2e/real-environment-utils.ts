@@ -23,8 +23,10 @@ export interface RustfsContainerHandle {
 }
 
 export interface ExecutorFixtureHandle {
+  readonly mode: "fixture" | "external";
   readonly baseUrl: string;
   readonly bucket: string;
+  readonly token?: string;
   readonly getEvents: () => readonly ExecutorFixtureEvent[];
   readonly stop: () => Promise<void>;
 }
@@ -185,6 +187,7 @@ export async function startExecutorFixture(input: {
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   return {
+    mode: "fixture",
     baseUrl,
     bucket: input.bucket,
     getEvents: () => events.slice(),
