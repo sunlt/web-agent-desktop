@@ -34,7 +34,8 @@ export class DockerCliClient implements DockerClient {
 
     const args = ["create", "--name", name];
     if (this.network) {
-      args.push("--network", this.network);
+      const resolvedNetwork = await this.resolveNetwork(this.network);
+      args.push("--network", resolvedNetwork);
     }
 
     args.push("--label", "managed-by=control-plane");
@@ -80,6 +81,35 @@ export class DockerCliClient implements DockerClient {
       maxBuffer: 10 * 1024 * 1024,
     });
     return stdout;
+  }
+
+  private async resolveNetwork(network: string): Promise<string> {
+    if (await this.networkExists(network)) {
+      return network;
+    }
+    try {
+      const listed = await this.run(["network", "ls", "--format", "{{.Name}}"]);
+      const candidates = listed
+        .split(/\r?\n/)
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+      const suffixMatched = candidates.filter((item) => item.endsWith(`_${network}`));
+      if (suffixMatched.length === 1) {
+        return suffixMatched[0];
+      }
+    } catch {
+      return network;
+    }
+    return network;
+  }
+
+  private async networkExists(network: string): Promise<boolean> {
+    try {
+      await this.run(["network", "inspect", network]);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

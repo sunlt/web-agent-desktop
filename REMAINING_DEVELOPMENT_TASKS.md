@@ -308,6 +308,7 @@
 - `docker-compose.yml`
 - `portal/nginx.conf`
 - `scripts/pre-commit-check.sh`
+- `scripts/e2e-gateway-executor-manager.sh`
 - `TODO_PROVIDER_MIGRATION_AND_REMAINING_PLAN.md`
 
 **Tasks**:
@@ -318,11 +319,12 @@
 - [x] 将 `session-worker` 生命周期核心逻辑从 control-plane 完全迁移到 `executor-manager`（去除 delegated 依赖）。
 - [x] 引入独立 observability 组件基础层：`prometheus`（compose）统一采集各服务健康与对账指标入口。
 - [x] 补齐 observability 深化能力：告警规则、日志聚合与可视化看板（Grafana/Loki/Alertmanager）。
+- [x] 增加 `gateway + executor-manager` 真实环境 E2E 脚本：`scripts/e2e-gateway-executor-manager.sh`（activate/cleanup/callback/sync 闭环）。
 - [ ] observability 通知渠道深化（企业告警接入：Webhook/IM/On-call 值班策略）与告警抑制策略精细化。
 
 **Verification Criteria**:
-- [ ] `docker compose up -d gateway control-plane portal` 后，前端 `/api` 走 gateway 链路可用。
-- [ ] gateway 侧可输出基础访问日志与 upstream 错误日志。
+- [x] `docker compose up -d --build` 后，`/api` 走 `gateway -> executor-manager/control-plane` 链路可用（已由 `scripts/e2e-gateway-executor-manager.sh` 验证）。
+- [x] gateway 侧可输出基础访问日志与 upstream 错误日志（真实链路压测期间验证通过）。
 
 **Exit Criteria**:
 - 形成独立网关入口，且部署图中应用流量不再直接访问 control-plane。
@@ -344,4 +346,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 18（网关/BFF 与部署边界拆分）
-- `next_commit`: `feat(phase-18): validate gateway + executor-manager real-env e2e`
+- `next_commit`: `feat(phase-18): harden observability alert channels`

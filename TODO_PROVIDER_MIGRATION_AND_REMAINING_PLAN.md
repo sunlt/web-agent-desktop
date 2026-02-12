@@ -147,6 +147,7 @@
 - [x] 已新增独立 `gateway` 服务（`gateway:3001`）承接 `/api`，`portal` 不再直连 `control-plane`。
 - [x] `executor-manager` 已独立部署并承接 `session-workers` 路由，生命周期核心逻辑已从 control-plane 迁移，并提供 `POST /api/session-workers/:sessionId/sync` 给回调/对账链路调用。
 - [x] docker 编排已补齐 `portal + gateway + executor-manager + control-plane + postgres + rustfs + executor + prometheus + alertmanager + grafana + loki + promtail`，并提供基础告警规则与默认看板。
+- [x] 真实链路已新增并跑通：`scripts/e2e-gateway-executor-manager.sh`（经 `gateway` 验证 activate/cleanup/callback/sync 闭环）。
 - [ ] 前端流式稳定性（断线重连/游标恢复）与高级工作台交互仍与设计目标存在差距。
 
 ---

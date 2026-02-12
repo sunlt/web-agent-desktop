@@ -13,6 +13,8 @@ FROM docker.m.daocloud.io/library/node:22-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache docker-cli
+
 COPY package*.json ./
 RUN npm ci --omit=dev
 

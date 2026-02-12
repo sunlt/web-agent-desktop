@@ -57,9 +57,6 @@ export function createExecutorManagerApp(
             process.env.EXECUTOR_CONTAINER_COMMAND_JSON,
           ),
           network: process.env.EXECUTOR_CONTAINER_NETWORK,
-          labels: {
-            "managed-by": "executor-manager",
-          },
         })
       : new NoopDockerClient());
 
