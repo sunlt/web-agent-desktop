@@ -92,7 +92,8 @@ SKIP_COMPOSE_UP="${STRESS_SKIP_COMPOSE_UP:-0}"
 COMPOSE_ENV_FILE=""
 
 mkdir -p "$REPORT_DIR"
-report_path="${REPORT_DIR}/phase21-provider-stress-$(date +%Y%m%d-%H%M%S).json"
+safe_provider="$(printf '%s' "$PROVIDER" | tr -c 'A-Za-z0-9_.-' '_')"
+report_path="${REPORT_DIR}/phase21-provider-stress-${safe_provider}-$(date +%Y%m%d-%H%M%S)-$$.json"
 report_md_path="${report_path%.json}.md"
 artifact_dir="${report_path%.json}-artifacts"
 mkdir -p "$artifact_dir"
@@ -406,7 +407,10 @@ parse_sse_result() {
         lowered.includes("api key") ||
         lowered.includes("not logged in") ||
         lowered.includes("forbidden") ||
-        lowered.includes("401")
+        lowered.includes("401") ||
+        lowered.includes("403") ||
+        lowered.includes("无权访问") ||
+        lowered.includes("令牌")
       ) {
         return {
           failureClass: "auth_missing",
@@ -456,6 +460,22 @@ parse_sse_result() {
         return {
           failureClass: "stream_incomplete",
           suggestion: "check SSE lifecycle, reconnect path, and upstream stream termination",
+        };
+      }
+      if (outcome === "canceled") {
+        if (
+          lowered.includes("aborted") ||
+          lowered.includes("user canceled") ||
+          lowered.includes("manual cancel")
+        ) {
+          return {
+            failureClass: "user_canceled",
+            suggestion: "ignore if cancellation is expected; otherwise inspect caller-side abort flow",
+          };
+        }
+        return {
+          failureClass: "provider_canceled",
+          suggestion: "inspect provider terminal reason and map cancellation causes (quota/network/policy)",
         };
       }
       if (outcome === "failed" && messageCount === 0) {
@@ -510,9 +530,9 @@ parse_sse_result() {
           if (lowered === "succeeded") {
             outcome = "succeeded";
             detail = "succeeded";
-          } else if (lowered === "canceled") {
+          } else if (lowered === "canceled" || lowered.startsWith("canceled:")) {
             outcome = "canceled";
-            detail = "canceled";
+            detail = statusDetail || "canceled";
           } else {
             outcome = "failed";
             detail = statusDetail || "finished-without-succeeded";

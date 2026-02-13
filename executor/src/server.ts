@@ -1,7 +1,7 @@
 import express, { type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import type { ChatMessage, ProviderKind } from "./providers/types.js";
 import { ClaudeCodeProviderAdapter } from "./providers/claude-code-provider.js";
 import { CodexCliProviderAdapter } from "./providers/codex-cli-provider.js";
 import { OpencodeProviderAdapter } from "./providers/opencode-provider.js";
@@ -19,6 +19,11 @@ import {
   WorkspaceFileError,
 } from "./workspace-files.js";
 import { execWorkspaceCommand } from "./workspace-terminal.js";
+import {
+  parseAfterSeq,
+  parseProviderRunStartInput,
+  streamProviderRun,
+} from "./provider-runs-http.js";
 
 type TodoStatus = "todo" | "doing" | "done" | "canceled";
 
@@ -87,37 +92,27 @@ app.get("/events", (_req, res) => {
 
 app.post("/provider-runs/start", withAuth, async (req, res) => {
   try {
-    const body = req.body as {
-      runId?: string;
-      provider?: unknown;
-      model?: unknown;
-      messages?: unknown;
-      resumeSessionId?: unknown;
-      executionProfile?: unknown;
-      tools?: unknown;
-      providerOptions?: unknown;
-      requireHumanLoop?: unknown;
-    };
-    const runId = requireString(body.runId, "runId");
-    const provider = parseProviderKind(body.provider);
-    const model = requireString(body.model, "model");
-    const messages = parseChatMessages(body.messages);
-    const resumeSessionId = optionalString(body.resumeSessionId);
-    const executionProfile = optionalString(body.executionProfile);
-    const tools = asObjectRecord(body.tools);
-    const providerOptions = asObjectRecord(body.providerOptions);
-    const requireHumanLoop = body.requireHumanLoop === true;
+    const parsed = parseProviderRunStartInput(req.body, {
+      requireRunId: true,
+      requireProvider: true,
+      allowAgentField: false,
+    });
+    const runId = parsed.runId as string;
 
     const result = await providerRunner.startRun({
       runId,
-      provider,
-      model,
-      messages,
-      ...(resumeSessionId ? { resumeSessionId } : {}),
-      ...(executionProfile ? { executionProfile } : {}),
-      ...(tools ? { tools } : {}),
-      ...(providerOptions ? { providerOptions } : {}),
-      ...(requireHumanLoop ? { requireHumanLoop } : {}),
+      provider: parsed.provider,
+      model: parsed.model,
+      messages: parsed.messages,
+      ...(parsed.resumeSessionId
+        ? { resumeSessionId: parsed.resumeSessionId }
+        : {}),
+      ...(parsed.executionProfile
+        ? { executionProfile: parsed.executionProfile }
+        : {}),
+      ...(parsed.tools ? { tools: parsed.tools } : {}),
+      ...(parsed.providerOptions ? { providerOptions: parsed.providerOptions } : {}),
+      ...(parsed.requireHumanLoop ? { requireHumanLoop: true } : {}),
     });
 
     if (!result.accepted) {
@@ -131,6 +126,55 @@ app.post("/provider-runs/start", withAuth, async (req, res) => {
   }
 });
 
+app.post("/run", withAuth, async (req, res) => {
+  try {
+    const parsed = parseProviderRunStartInput(req.body, {
+      requireRunId: false,
+      requireProvider: false,
+      allowAgentField: true,
+    });
+    const runId = parsed.runId ?? randomUUID();
+
+    const result = await providerRunner.startRun({
+      runId,
+      provider: parsed.provider,
+      model: parsed.model,
+      messages: parsed.messages,
+      ...(parsed.resumeSessionId
+        ? { resumeSessionId: parsed.resumeSessionId }
+        : {}),
+      ...(parsed.executionProfile
+        ? { executionProfile: parsed.executionProfile }
+        : {}),
+      ...(parsed.tools ? { tools: parsed.tools } : {}),
+      ...(parsed.providerOptions ? { providerOptions: parsed.providerOptions } : {}),
+      ...(parsed.requireHumanLoop ? { requireHumanLoop: true } : {}),
+    });
+
+    if (!result.accepted) {
+      return res.status(409).json(result);
+    }
+
+    providerRunner.ensurePump(runId);
+    recordEvent(req, "/run");
+    streamProviderRun({
+      req,
+      res,
+      runId,
+      afterSeq: 0,
+      providerRunner,
+      startedPayload: {
+        runId,
+        warnings: result.warnings,
+      },
+      cancelOnClientClose: true,
+    });
+    return;
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
 app.get("/provider-runs/:runId/stream", withAuth, async (req, res) => {
   const runId = req.params.runId;
   if (!providerRunner.hasRun(runId)) {
@@ -138,36 +182,13 @@ app.get("/provider-runs/:runId/stream", withAuth, async (req, res) => {
   }
 
   providerRunner.ensurePump(runId);
-
-  res.status(200);
-  res.setHeader("content-type", "text/event-stream; charset=utf-8");
-  res.setHeader("cache-control", "no-cache");
-  res.setHeader("connection", "keep-alive");
-  res.flushHeaders?.();
-
-  const afterSeq = parseAfterSeq(req);
-
-  const unsubscribe = providerRunner.subscribe({
+  streamProviderRun({
+    req,
+    res,
     runId,
-    afterSeq,
-    onEvent: (entry) => {
-      res.write(`id: ${entry.seq}\n`);
-      res.write(`event: ${entry.event.type}\n`);
-      res.write(`data: ${JSON.stringify(entry.event)}\n\n`);
-    },
-    onClose: () => {
-      res.write(`event: provider.closed\ndata: ${JSON.stringify({ runId })}\n\n`);
-      res.end();
-    },
-  });
-
-  const heartbeat = setInterval(() => {
-    res.write(": heartbeat\n\n");
-  }, 15_000);
-
-  req.on("close", () => {
-    clearInterval(heartbeat);
-    unsubscribe();
+    afterSeq: parseAfterSeq(req),
+    providerRunner,
+    cancelOnClientClose: false,
   });
 });
 
@@ -703,72 +724,6 @@ function handleError(res: Response, error: unknown): void {
   res.status(500).json({
     error: message,
   });
-}
-
-function parseChatMessages(value: unknown): ChatMessage[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("messages is required");
-  }
-
-  const parsed: ChatMessage[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") {
-      throw new Error("invalid message item");
-    }
-    const message = item as { role?: unknown; content?: unknown };
-    const role = parseMessageRole(message.role);
-    const content = requireString(message.content, "content");
-    parsed.push({ role, content });
-  }
-
-  return parsed;
-}
-
-function parseMessageRole(value: unknown): ChatMessage["role"] {
-  if (value === "system" || value === "user" || value === "assistant") {
-    return value;
-  }
-  throw new Error(`invalid message role: ${String(value)}`);
-}
-
-function parseProviderKind(value: unknown): ProviderKind {
-  if (
-    value === "claude-code" ||
-    value === "opencode" ||
-    value === "codex-cli" ||
-    value === "codex-app-server"
-  ) {
-    return value;
-  }
-  throw new Error(`invalid provider: ${String(value)}`);
-}
-
-function asObjectRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function parseAfterSeq(req: Request): number {
-  const queryCursor =
-    typeof req.query?.cursor === "string" ? req.query.cursor : undefined;
-  const lastEventId = req.headers["last-event-id"];
-  const headerCursor =
-    typeof lastEventId === "string"
-      ? lastEventId
-      : Array.isArray(lastEventId)
-        ? lastEventId[0]
-        : undefined;
-  const raw = queryCursor ?? headerCursor;
-  if (!raw) {
-    return 0;
-  }
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    return 0;
-  }
-  return parsed;
 }
 
 function resolveProviderAdapters(mode: string) {

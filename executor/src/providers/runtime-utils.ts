@@ -205,30 +205,41 @@ export function createStreamingRunHandle(input: {
 
           if (part.type === "abort" && !finished) {
             finished = true;
-            yield emitFinish("canceled");
+            const abortReason =
+              typeof part.reason === "string" && part.reason.trim().length > 0
+                ? `aborted:${part.reason.trim()}`
+                : "aborted";
+            yield emitFinish("canceled", abortReason);
+            continue;
+          }
+
+          if (part.type === "error" && !finished) {
+            finished = true;
+            yield emitFinish("failed", normalizeErrorReason(part.error));
             continue;
           }
 
           if (part.type === "finish" && !finished) {
             finished = true;
-            const status = mapFinishReason(part.finishReason, abortController.signal.aborted);
-            const reason = status === "failed"
-              ? `finish_reason:${part.finishReason ?? "error"}`
-              : undefined;
-            yield emitFinish(status, reason, toUsageRecord(part.totalUsage));
+            const mapped = mapFinishResult(
+              part.finishReason,
+              abortController.signal.aborted,
+            );
+            yield emitFinish(
+              mapped.status,
+              mapped.reason,
+              toUsageRecord(part.totalUsage),
+            );
           }
         }
 
         if (!finished) {
           const reason = await result.finishReason;
           const usage = await result.totalUsage;
-          const status = mapFinishReason(reason, abortController.signal.aborted);
-          const detail = status === "failed"
-            ? `finish_reason:${reason ?? "error"}`
-            : undefined;
+          const mapped = mapFinishResult(reason, abortController.signal.aborted);
           yield emitFinish(
-            status,
-            detail,
+            mapped.status,
+            mapped.reason,
             toUsageRecord(usage),
           );
         }
@@ -243,7 +254,7 @@ export function createStreamingRunHandle(input: {
 
         yield emitFinish(
           "failed",
-          error instanceof Error ? error.message : String(error),
+          normalizeErrorReason(error),
         );
       }
     },
@@ -253,23 +264,37 @@ export function createStreamingRunHandle(input: {
   };
 }
 
-function mapFinishReason(
+function mapFinishResult(
   reason: string | undefined,
   aborted: boolean,
-): "succeeded" | "failed" | "canceled" {
+): {
+  status: "succeeded" | "failed" | "canceled";
+  reason?: string;
+} {
   if (aborted) {
-    return "canceled";
+    return {
+      status: "canceled",
+      reason: "aborted",
+    };
   }
 
   if (reason === "error" || reason === "content-filter") {
-    return "failed";
+    return {
+      status: "failed",
+      reason: `finish_reason:${reason}`,
+    };
   }
 
   if (reason === "other") {
-    return "canceled";
+    return {
+      status: "canceled",
+      reason: "finish_reason:other",
+    };
   }
 
-  return "succeeded";
+  return {
+    status: "succeeded",
+  };
 }
 
 function toUsageRecord(usage: unknown): Record<string, unknown> | undefined {
@@ -282,4 +307,22 @@ function toUsageRecord(usage: unknown): Record<string, unknown> | undefined {
       ([, value]) => value !== undefined,
     ),
   );
+}
+
+function normalizeErrorReason(error: unknown): string {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    return message.length > 0 ? message : error.name;
+  }
+  if (typeof error === "string") {
+    const message = error.trim();
+    return message.length > 0 ? message : "unknown_error";
+  }
+  if (error && typeof error === "object") {
+    const candidate = (error as { message?: unknown }).message;
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return "unknown_error";
 }
