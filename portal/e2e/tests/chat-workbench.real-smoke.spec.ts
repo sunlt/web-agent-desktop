@@ -24,7 +24,7 @@ describeReal("Portal Real Backend Smoke", () => {
     });
 
     const assistantBubble = page.locator(".bubble-assistant pre").last();
-    await expect(assistantBubble).toContainText("[scripted:codex-cli]", {
+    await expect(assistantBubble).toContainText("[scripted:codex-app-server]", {
       timeout: 60_000,
     });
     await expect(assistantBubble).toContainText(prompt, {

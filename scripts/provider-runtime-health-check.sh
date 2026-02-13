@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-PROVIDER="${PROVIDER_HEALTH_PROVIDER:-codex-cli}"
+PROVIDER="${PROVIDER_HEALTH_PROVIDER:-codex-app-server}"
 RUNTIME_CONTAINER="${PROVIDER_HEALTH_RUNTIME_CONTAINER:-executor}"
 CONTROL_PLANE_CONTAINER="${PROVIDER_HEALTH_CONTROL_PLANE_CONTAINER:-control-plane}"
 EXECUTOR_MANAGER_CONTAINER="${PROVIDER_HEALTH_EXECUTOR_MANAGER_CONTAINER:-executor-manager}"
@@ -60,7 +60,7 @@ auth_file_cmd=""
 auth_hint=""
 auth_env_name=""
 case "$PROVIDER" in
-  codex-cli)
+  codex-cli|codex-app-server)
     cli_name="codex"
     auth_file_cmd='[ -f /root/.codex/auth.json ] || [ -f /root/.codex/config.json ]'
     auth_hint="/root/.codex/auth.json or /root/.codex/config.json"

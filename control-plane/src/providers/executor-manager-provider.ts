@@ -55,6 +55,12 @@ const CAPABILITY_BY_PROVIDER: Record<
     todoStream: true,
     buildPlanMode: false,
   },
+  "codex-app-server": {
+    resume: true,
+    humanLoop: true,
+    todoStream: true,
+    buildPlanMode: false,
+  },
 };
 
 export class ExecutorManagerProviderAdapter implements AgentProviderAdapter {

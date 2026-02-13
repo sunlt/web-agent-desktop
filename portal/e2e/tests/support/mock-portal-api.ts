@@ -169,7 +169,7 @@ export async function mockPortalApi(page: Page, state: MockApiState): Promise<vo
         chatId,
         sessionId: payload.sessionId ?? chatId,
         title: payload.title ?? "新会话",
-        provider: payload.provider ?? "codex-cli",
+        provider: payload.provider ?? "codex-app-server",
         model: payload.model ?? "gpt-5.1-codex",
         createdAt: now,
         updatedAt: now,

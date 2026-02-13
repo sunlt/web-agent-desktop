@@ -732,7 +732,12 @@ function parseMessageRole(value: unknown): ChatMessage["role"] {
 }
 
 function parseProviderKind(value: unknown): ProviderKind {
-  if (value === "claude-code" || value === "opencode" || value === "codex-cli") {
+  if (
+    value === "claude-code" ||
+    value === "opencode" ||
+    value === "codex-cli" ||
+    value === "codex-app-server"
+  ) {
     return value;
   }
   throw new Error(`invalid provider: ${String(value)}`);

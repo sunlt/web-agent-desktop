@@ -65,7 +65,7 @@ COMPOSE_SERVICES=(
 ITERATIONS="${STRESS_ITERATIONS:-5}"
 RUN_TIMEOUT_SEC="${STRESS_RUN_TIMEOUT_SEC:-90}"
 PRECHECK_TIMEOUT_SEC="${STRESS_PRECHECK_TIMEOUT_SEC:-45}"
-PROVIDER="${STRESS_PROVIDER:-codex-cli}"
+PROVIDER="${STRESS_PROVIDER:-codex-app-server}"
 MODEL="${STRESS_MODEL:-gpt-5.1-codex}"
 REQUIRE_HUMAN_LOOP="${STRESS_REQUIRE_HUMAN_LOOP:-0}"
 SUCCESS_RATE_THRESHOLD="${STRESS_SUCCESS_RATE_THRESHOLD:-0.8}"
@@ -211,7 +211,7 @@ check_provider_runtime() {
   local auth_hint=""
 
   case "$PROVIDER" in
-    codex-cli)
+    codex-cli|codex-app-server)
       cli_name="codex"
       auth_check_cmd='[ -f /root/.codex/auth.json ] || [ -f /root/.codex/config.json ]'
       auth_hint="check /root/.codex/auth.json or /root/.codex/config.json"

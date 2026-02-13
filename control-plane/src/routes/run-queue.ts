@@ -10,7 +10,7 @@ const chatMessageSchema = z.object({
 const enqueueSchema = z.object({
   runId: z.string().optional(),
   sessionId: z.string().min(1),
-  provider: z.enum(["claude-code", "opencode", "codex-cli"]),
+  provider: z.enum(["claude-code", "opencode", "codex-cli", "codex-app-server"]),
   model: z.string().min(1),
   messages: z.array(chatMessageSchema).min(1),
   resumeSessionId: z.string().optional(),

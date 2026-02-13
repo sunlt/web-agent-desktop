@@ -27,14 +27,15 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(
 );
 
 const DEFAULT_MODEL: Record<ProviderKind, string> = {
+  "codex-app-server": "gpt-5.1-codex",
   "codex-cli": "gpt-5.1-codex",
   opencode: "openai/gpt-5.1-codex",
   "claude-code": "claude-sonnet-4-20250514",
 };
 
 export default function App() {
-  const [provider, setProvider] = useState<ProviderKind>("codex-cli");
-  const [model, setModel] = useState<string>(DEFAULT_MODEL["codex-cli"]);
+  const [provider, setProvider] = useState<ProviderKind>("codex-app-server");
+  const [model, setModel] = useState<string>(DEFAULT_MODEL["codex-app-server"]);
   const [requireHumanLoop, setRequireHumanLoop] = useState<boolean>(true);
 
   const [globalFileUserId, setGlobalFileUserId] = useState<string>("u-alice");
@@ -174,6 +175,7 @@ export default function App() {
             onChange={(event) => setProvider(event.target.value as ProviderKind)}
             disabled={runChat.runStatus === "running"}
           >
+            <option value="codex-app-server">codex-app-server</option>
             <option value="codex-cli">codex-cli</option>
             <option value="opencode">opencode</option>
             <option value="claude-code">claude-code</option>

@@ -458,5 +458,5 @@
 14. Phase 21（进行中）
 
 ## 当前阶段
-- `in_progress`: Phase 22（Executor Runtime 边界收口：control-plane 去本地 provider 依赖）
-- `next_commit`: `refactor(phase-22): remove local ai-sdk provider runtime from control-plane`
+- `in_progress`: Phase 23（Provider 协议命名收口：codex-app-server 兼容 + 默认切换）
+- `next_commit`: `refactor(phase-executor-runtime-6): add codex-app-server alias across gateway/control-plane/executor path`

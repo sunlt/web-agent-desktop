@@ -126,7 +126,8 @@ function normalizePrompt(messages: ProviderRunInput["messages"]): string {
 }
 
 function buildAnswer(kind: ProviderKind, prompt: string): string {
-  return `[scripted:${kind}] ${prompt}`;
+  const displayKind = kind === "codex-cli" ? "codex-app-server" : kind;
+  return `[scripted:${displayKind}] ${prompt}`;
 }
 
 function delay(ms: number): Promise<void> {

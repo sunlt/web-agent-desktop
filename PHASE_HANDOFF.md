@@ -1670,3 +1670,69 @@
 
 ### next_phase
 - 对照 `设计.md` 做“实质未完成项”复盘，明确仅剩任务并按优先级推进（优先真实 provider flaky 收敛与协议命名收口）。
+
+## Phase 23: Provider 协议命名收口（codex-app-server）
+
+### objective
+- 在保持 `codex-cli` 兼容的同时，打通 `codex-app-server` 命名在 portal/control-plane/executor-manager/executor 全链路可用。
+
+### inputs
+- Phase 22 已完成 control-plane 本地 provider runtime 依赖清理。
+- 现状仍以 `codex-cli` 为主命名，容易被误解为 control-plane 仍在本地执行 CLI。
+
+### actions
+- provider 类型层新增别名支持：`codex-app-server`。
+- `control-plane` 与 `executor` 的 `ProviderRegistry` 增加别名归一化（`codex-app-server -> codex-cli` adapter）。
+- 路由入参放开别名：
+  - `control-plane`：`/api/runs/start`、`/api/runs/queue/enqueue`
+  - `executor-manager`：`/api/provider-runs/start`
+  - `executor`：`/provider-runs/start`
+- portal 默认 provider 切换到 `codex-app-server`，并保留 `codex-cli` 选项。
+- scripted 回包前缀显示统一为 `scripted:codex-app-server`（避免 UI 残留旧命名）。
+- 脚本默认 provider 切换为 `codex-app-server`，并保留 `codex-cli` 兼容分支。
+- 更新受影响 E2E/脚本断言。
+
+### outputs
+- `control-plane/src/providers/types.ts`
+- `control-plane/src/providers/provider-registry.ts`
+- `control-plane/src/providers/executor-manager-provider.ts`
+- `control-plane/src/providers/scripted-provider.ts`
+- `control-plane/src/routes/runs.ts`
+- `control-plane/src/routes/run-queue.ts`
+- `control-plane/test/e2e/executor-manager-provider.e2e.test.ts`
+- `executor-manager/src/routes/provider-runs.ts`
+- `executor/src/providers/types.ts`
+- `executor/src/providers/provider-registry.ts`
+- `executor/src/providers/scripted-provider.ts`
+- `executor/src/server.ts`
+- `portal/src/App.tsx`
+- `portal/src/workbench/transport.ts`
+- `portal/src/workbench/use-run-chat.ts`
+- `portal/e2e/tests/chat-workbench.spec.ts`
+- `portal/e2e/tests/chat-workbench.real-smoke.spec.ts`
+- `portal/e2e/tests/support/mock-portal-api.ts`
+- `scripts/provider-runtime-health-check.sh`
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `scripts/e2e-full-conversation-real-env.sh`
+- `EXECUTOR_PROVIDER_RUNTIME_REFACTOR_PLAN.md`
+
+### validation
+- commands:
+  - `cd control-plane && npm run lint && npm run typecheck && npm test`
+  - `cd executor && npm run lint && npm run typecheck`
+  - `cd executor-manager && npm run lint && npm run typecheck`
+  - `cd portal && npm run lint && npm run typecheck && npm test`
+- results:
+  - control-plane lint/typecheck/test 全通过（Vitest `48 passed`, `3 skipped`）。
+  - executor lint/typecheck 通过。
+  - executor-manager lint/typecheck 通过。
+  - portal lint/typecheck/Playwright 通过（`8 passed`, `1 skipped`）。
+
+### gate_result
+- **Pass**（`codex-app-server` 命名可全链路使用，且旧 `codex-cli` 兼容保留）
+
+### risks
+- 当前 adapter 层仍以内部 `codex-cli` 作为 canonical key；后续若完全去除旧名，需要补一轮数据与接口字段迁移策略。
+
+### next_phase
+- 结合真实 provider 压测报告继续收敛 `provider_no_output` 失败簇（优先凭据/模型可用性与 executor 运行参数）。

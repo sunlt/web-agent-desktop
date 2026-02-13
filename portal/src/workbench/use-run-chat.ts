@@ -127,7 +127,7 @@ export function useRunChat(input: {
   const activeChatIdRef = useRef<string | null>(null);
   const historyBootstrappedRef = useRef(false);
   const runConfigRef = useRef<RunStartConfig>({
-    provider: "codex-cli",
+    provider: "codex-app-server",
     model: "gpt-5.1-codex",
     requireHumanLoop: true,
   });

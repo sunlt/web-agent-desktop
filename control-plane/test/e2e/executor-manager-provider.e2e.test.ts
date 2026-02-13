@@ -3,7 +3,11 @@ import { describe, expect, test } from "vitest";
 import { createControlPlaneApp } from "../../src/app.js";
 import { withHttpServer } from "./http-test-utils.js";
 
-type ProviderKind = "claude-code" | "opencode" | "codex-cli";
+type ProviderKind =
+  | "claude-code"
+  | "opencode"
+  | "codex-cli"
+  | "codex-app-server";
 
 type MockRunState = {
   readonly runId: string;
@@ -107,7 +111,7 @@ describe("Executor-Manager Provider E2E", () => {
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
                 runId,
-                provider: "codex-cli",
+                provider: "codex-app-server",
                 model: "gpt-5.1-codex",
                 messages: [{ role: "user", content: "wait for human reply" }],
                 requireHumanLoop: true,
@@ -162,7 +166,7 @@ describe("Executor-Manager Provider E2E", () => {
 
     expect(mock.state.starts).toHaveLength(1);
     expect(mock.state.starts[0]).toMatchObject({
-      provider: "codex-cli",
+      provider: "codex-app-server",
       requireHumanLoop: true,
     });
     expect(mock.state.replies).toHaveLength(1);
@@ -196,7 +200,9 @@ function createMockExecutorManager(): MockExecutorManager {
       runId: body.runId,
       provider: body.provider,
       requireHumanLoop:
-        body.requireHumanLoop === true || body.provider === "codex-cli",
+        body.requireHumanLoop === true ||
+        body.provider === "codex-cli" ||
+        body.provider === "codex-app-server",
       model: body.model,
       messages: body.messages,
       streamResponse: null,

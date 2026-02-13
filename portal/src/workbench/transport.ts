@@ -8,7 +8,11 @@ import { extractMessageText, resolveResponseError } from "./utils";
 
 const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 3500, 5000];
 
-export type ProviderKind = "claude-code" | "opencode" | "codex-cli";
+export type ProviderKind =
+  | "claude-code"
+  | "opencode"
+  | "codex-cli"
+  | "codex-app-server";
 
 export interface RunStartConfig {
   readonly provider: ProviderKind;

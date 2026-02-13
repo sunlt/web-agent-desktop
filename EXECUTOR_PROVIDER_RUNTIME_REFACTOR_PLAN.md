@@ -97,6 +97,32 @@
 - `control-plane` 源码不再 import `ai-sdk-provider-*`。
 - `npm run lint && npm run typecheck && npm test`（control-plane）通过。
 
+### Phase F：协议命名收口（`codex-app-server` 兼容）
+
+目标：在不破坏现有 `codex-cli` 客户端的前提下，全链路接受并优先使用 `codex-app-server` 命名，降低“CLI 执行在 control-plane”的认知歧义。
+
+范围：
+- `control-plane/src/providers/types.ts`
+- `control-plane/src/providers/provider-registry.ts`
+- `control-plane/src/routes/runs.ts`
+- `control-plane/src/routes/run-queue.ts`
+- `executor-manager/src/routes/provider-runs.ts`
+- `executor/src/providers/types.ts`
+- `executor/src/providers/provider-registry.ts`
+- `executor/src/server.ts`
+- `portal/src/App.tsx`
+- `portal/src/workbench/transport.ts`
+- `portal/src/workbench/use-run-chat.ts`
+- `portal/e2e/tests/*`
+- `scripts/provider-runtime-health-check.sh`
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `scripts/e2e-full-conversation-real-env.sh`
+
+验收：
+- 以上路由/服务均可接受 `provider=codex-app-server`。
+- portal 默认 provider 切换为 `codex-app-server`。
+- 保留 `codex-cli` 向后兼容。
+
 ## 4. 兼容与回滚策略
 
 1. 保留 `CONTROL_PLANE_PROVIDER_MODE=scripted` 作为测试与回滚保底。
@@ -115,4 +141,5 @@
 - Phase B：已完成（commit: `7413478`）
 - Phase C：已完成（commit: `7413478` + `c0b36e2` + `41c3caf`）
 - Phase D：已完成（commit: `f38f9aa`）
-- Phase E：进行中（本次提交）
+- Phase E：已完成（commit: `e4ece48`）
+- Phase F：进行中（本次提交）

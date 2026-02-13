@@ -1,4 +1,19 @@
-export type ProviderKind = "claude-code" | "opencode" | "codex-cli";
+export const PROVIDER_KINDS = [
+  "claude-code",
+  "opencode",
+  "codex-cli",
+  "codex-app-server",
+] as const;
+
+export type ProviderKind = (typeof PROVIDER_KINDS)[number];
+export type CanonicalProviderKind = Exclude<ProviderKind, "codex-app-server">;
+
+export function normalizeProviderKind(kind: ProviderKind): CanonicalProviderKind {
+  if (kind === "codex-app-server") {
+    return "codex-cli";
+  }
+  return kind;
+}
 
 export interface ChatMessage {
   readonly role: "system" | "user" | "assistant";

@@ -1,24 +1,29 @@
 import { ProviderNotFoundError } from "./errors.js";
-import type { AgentProviderAdapter, ProviderKind } from "./types.js";
+import {
+  normalizeProviderKind,
+  type AgentProviderAdapter,
+  type CanonicalProviderKind,
+  type ProviderKind,
+} from "./types.js";
 
 export class ProviderRegistry {
-  private readonly adapters = new Map<ProviderKind, AgentProviderAdapter>();
+  private readonly adapters = new Map<CanonicalProviderKind, AgentProviderAdapter>();
 
   constructor(adapters: readonly AgentProviderAdapter[]) {
     for (const adapter of adapters) {
-      this.adapters.set(adapter.kind, adapter);
+      this.adapters.set(normalizeProviderKind(adapter.kind), adapter);
     }
   }
 
   get(kind: ProviderKind): AgentProviderAdapter {
-    const adapter = this.adapters.get(kind);
+    const adapter = this.adapters.get(normalizeProviderKind(kind));
     if (!adapter) {
       throw new ProviderNotFoundError(kind);
     }
     return adapter;
   }
 
-  listKinds(): ProviderKind[] {
+  listKinds(): CanonicalProviderKind[] {
     return Array.from(this.adapters.keys());
   }
 }

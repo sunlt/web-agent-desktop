@@ -191,7 +191,7 @@ log "create chat history session"
 chat_create_resp=$(curl -fsS \
   -X POST \
   -H 'content-type: application/json' \
-  -d '{"title":"phase19 real env chat","provider":"codex-cli","model":"gpt-5.1-codex"}' \
+  -d '{"title":"phase19 real env chat","provider":"codex-app-server","model":"gpt-5.1-codex"}' \
   "http://127.0.0.1:3001/api/chat-opencode-history")
 assert_json "chat created" "if(!data.chat?.chatId){process.exit(1)}" "$chat_create_resp"
 chat_id=$(printf '%s' "$chat_create_resp" | node -e "const fs=require('node:fs');const data=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(data.chat.chatId)")
@@ -202,7 +202,7 @@ run_stream=$(curl -fsS -N \
   -H 'accept: text/event-stream' \
   -H 'content-type: application/json' \
   -d "$(cat <<JSON
-{"runId":"${run_id}","provider":"codex-cli","model":"gpt-5.1-codex","messages":[{"role":"user","content":"请输出一段简短问候"}],"requireHumanLoop":false}
+{"runId":"${run_id}","provider":"codex-app-server","model":"gpt-5.1-codex","messages":[{"role":"user","content":"请输出一段简短问候"}],"requireHumanLoop":false}
 JSON
 )" \
   "http://127.0.0.1:3001/api/runs/start")
@@ -238,7 +238,7 @@ chat_update_resp=$(curl -fsS \
   -X PUT \
   -H 'content-type: application/json' \
   -d "$(cat <<JSON
-{"title":"phase19 real env chat","provider":"codex-cli","model":"gpt-5.1-codex","messages":[{"role":"user","content":"请输出一段简短问候"},{"role":"assistant","content":"[scripted:codex-cli] 请输出一段简短问候"}]}
+{"title":"phase19 real env chat","provider":"codex-app-server","model":"gpt-5.1-codex","messages":[{"role":"user","content":"请输出一段简短问候"},{"role":"assistant","content":"[scripted:codex-app-server] 请输出一段简短问候"}]}
 JSON
 )" \
   "http://127.0.0.1:3001/api/chat-opencode-history/${chat_id}")
