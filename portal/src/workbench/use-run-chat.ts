@@ -86,8 +86,17 @@ export function useRunChat(input: {
   readonly model: string;
   readonly requireHumanLoop: boolean;
   readonly activeStoreApp: ActiveStoreApp | null;
+  readonly historyUserId: string;
 }): RunChatController {
-  const { apiBase, provider, model, requireHumanLoop, activeStoreApp } = input;
+  const {
+    apiBase,
+    provider,
+    model,
+    requireHumanLoop,
+    activeStoreApp,
+    historyUserId,
+  } = input;
+  const scopedHistoryUserId = historyUserId.trim() || "u-anon";
 
   const [inputText, setInputText] = useState<string>("");
   const [runStatus, setRunStatus] = useState<UiRunStatus>("idle");
@@ -450,13 +459,14 @@ export function useRunChat(input: {
   const createHistorySession = useCallback(async () => {
     const title = activeStoreApp ? `[${activeStoreApp.name}] 新会话` : "新会话";
     const created = await fetchJson<{ chat: HistorySummary }>(
-      "/chat-opencode-history",
+      `/chat-opencode-history?userId=${encodeURIComponent(scopedHistoryUserId)}`,
       {
         method: "POST",
         headers: {
           "content-type": "application/json",
         },
         body: JSON.stringify({
+          userId: scopedHistoryUserId,
           provider,
           model,
           title,
@@ -476,7 +486,7 @@ export function useRunChat(input: {
         : "新会话";
 
       const saved = await fetchJson<{ chat: HistorySummary }>(
-        `/chat-opencode-history/${encodeURIComponent(chatId)}`,
+        `/chat-opencode-history/${encodeURIComponent(chatId)}?userId=${encodeURIComponent(scopedHistoryUserId)}`,
         {
           method: "PUT",
           headers: {
@@ -493,7 +503,7 @@ export function useRunChat(input: {
 
       upsertHistorySummary(saved.chat);
     },
-    [fetchJson, model, provider, upsertHistorySummary],
+    [fetchJson, model, provider, scopedHistoryUserId, upsertHistorySummary],
   );
 
   const resetRunView = useCallback(() => {
@@ -524,7 +534,9 @@ export function useRunChat(input: {
         const detail = await fetchJson<{
           chat: HistorySummary;
           messages: HistoryStoredMessage[];
-        }>(`/chat-opencode-history/${encodeURIComponent(chatId)}`);
+        }>(
+          `/chat-opencode-history/${encodeURIComponent(chatId)}?userId=${encodeURIComponent(scopedHistoryUserId)}`,
+        );
 
         setMessages(
           toPortalMessages(detail.messages, (createdAt) => ({ createdAt })),
@@ -539,7 +551,7 @@ export function useRunChat(input: {
         setHistoryError(message);
       }
     },
-    [fetchJson, resetRunView, setMessages, upsertHistorySummary],
+    [fetchJson, resetRunView, scopedHistoryUserId, setMessages, upsertHistorySummary],
   );
 
   const ensureActiveChat = useCallback(async () => {
@@ -595,7 +607,7 @@ export function useRunChat(input: {
       setHistoryError("");
       try {
         const list = await fetchJson<{ chats: HistorySummary[] }>(
-          "/chat-opencode-history?limit=50",
+          `/chat-opencode-history?limit=50&userId=${encodeURIComponent(scopedHistoryUserId)}`,
         );
         if (cancelled) {
           return;
@@ -634,7 +646,7 @@ export function useRunChat(input: {
     return () => {
       cancelled = true;
     };
-  }, [createHistorySession, fetchJson, loadChatDetail, setMessages]);
+  }, [createHistorySession, fetchJson, loadChatDetail, scopedHistoryUserId, setMessages]);
 
   useEffect(() => {
     if (!activeRunId) {
@@ -830,33 +842,12 @@ export function useRunChat(input: {
     input: inputText,
     setInput: setInputText,
     messages,
-    runStatus,
-    runDetail,
-    activeRunId,
-    activeChatId,
-    chatHistory,
-    historyStatus,
-    historyError,
-    todoItems,
-    groupedTodos,
-    todoEvents,
-    pendingRequests,
-    resolvedRequests,
-    answerDrafts,
-    setAnswerDrafts,
-    replying,
-    replyFeedback,
-    timeline,
-    errorText,
-    streamConnection,
-    nowTick,
-    submitting,
-    appendTimeline,
-    fetchJson,
-    handleCreateChat,
-    handleSelectChat,
-    handleSend,
-    handleStop,
-    handleReply,
+    runStatus, runDetail, activeRunId, activeChatId,
+    chatHistory, historyStatus, historyError,
+    todoItems, groupedTodos, todoEvents,
+    pendingRequests, resolvedRequests, answerDrafts, setAnswerDrafts,
+    replying, replyFeedback, timeline, errorText,
+    streamConnection, nowTick, submitting, appendTimeline, fetchJson,
+    handleCreateChat, handleSelectChat, handleSend, handleStop, handleReply,
   };
 }
