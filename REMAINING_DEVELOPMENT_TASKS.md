@@ -365,6 +365,37 @@
 
 ---
 
+## Phase 20: Portal 真实后端 Smoke E2E（进行中）
+**Type**: Frontend + Integration
+**Estimated**: 3~6 小时
+**目标**: 在非 mock API 条件下验证 ChatUI 到真实后端链路可用，并沉淀一键 smoke 脚本。
+
+**范围文件**:
+- `portal/playwright.config.ts`
+- `portal/e2e/tests/chat-workbench.real-smoke.spec.ts`
+- `scripts/e2e-portal-real-smoke.sh`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+- `PHASE_HANDOFF.md`
+
+**Tasks**:
+- [x] Playwright 配置支持 real 模式（`PORTAL_E2E_REAL=1` 时不启动 Vite dev server，直接连接外部 baseURL）。
+- [x] 新增真实后端 smoke 用例：`chat-workbench.real-smoke.spec.ts`（验证发送消息 -> SSE 回包 -> run 成功）。
+- [x] 新增一键脚本 `scripts/e2e-portal-real-smoke.sh`：
+  - compose 启动真实服务并开启 `CONTROL_PLANE_PROVIDER_MODE=scripted`
+  - 自动补齐 DB migrations（001/002/003）
+  - 执行 portal real-backend Playwright smoke。
+- [x] 调整断言，避免 run 结束后 todo 轮询覆盖导致的非稳定用例失败。
+
+**Verification Criteria**:
+- [x] `cd portal && npm run lint && npm run typecheck` 通过。
+- [x] `bash scripts/e2e-portal-real-smoke.sh` 通过。
+- [x] `bash scripts/pre-commit-check.sh` 通过。
+
+**Exit Criteria**:
+- portal 在真实后端环境具备可重复执行的 smoke 保障，不再仅依赖 mock API E2E。
+
+---
+
 ## 执行顺序
 1. Phase 8（已完成）
 2. Phase 9（已完成）
@@ -378,7 +409,8 @@
 10. Phase 17（进行中）
 11. Phase 18（进行中）
 12. Phase 19（进行中）
+13. Phase 20（进行中）
 
 ## 当前阶段
-- `in_progress`: Phase 19（真实环境完整对话闭环 E2E 稳定化）
-- `next_commit`: `test(phase-19): stabilize full conversation real-env e2e`
+- `in_progress`: Phase 20（Portal 真实后端 Smoke E2E）
+- `next_commit`: `test(phase-20): add portal real-backend smoke e2e`

@@ -1316,3 +1316,58 @@
 
 ### next_phase
 - Phase 20：补齐 `portal` 真实后端 Playwright smoke（非 mock API）与真实 provider 模式压测基线。
+
+---
+
+## Phase 20: Portal 真实后端 Smoke E2E
+
+### objective
+- 为 ChatUI 增加“非 mock API”的真实后端 smoke 验证，确保 `portal -> gateway -> control-plane/executor-manager` 链路在真实 compose 环境稳定可用。
+
+### inputs
+- 已有 `portal` Playwright 用例主要基于 route mock，无法覆盖真实后端联通性。
+- 已有 phase19 脚本验证后端链路，但不覆盖浏览器端真实交互。
+- 用户要求继续推进剩余 task，优先补齐真实联调口径。
+
+### actions
+- Playwright real 模式支持：
+  - 修改 `portal/playwright.config.ts`：
+    - `PORTAL_E2E_REAL=1` 时禁用 `webServer`，改为连接 `PORTAL_E2E_BASE_URL`（默认 `http://127.0.0.1`）。
+- 新增真实后端 smoke 用例：
+  - `portal/e2e/tests/chat-workbench.real-smoke.spec.ts`
+  - 用例路径：打开门户 -> 发送真实消息 -> 验证 assistant 收到 scripted 回包 -> 验证 run 状态 `succeeded`。
+  - 设定 `REAL_PORTAL_E2E=1` 才启用，避免影响常规 mock E2E。
+- 新增一键脚本：
+  - `scripts/e2e-portal-real-smoke.sh`
+  - 能力：
+    - 启动 compose 全链路（含 `portal`）并设置 `CONTROL_PLANE_PROVIDER_MODE=scripted`
+    - 自动执行 DB migration 补偿（001/002/003）
+    - 执行 `portal` real-backend Playwright smoke
+- 稳定性修正：
+  - 移除 real smoke 中依赖 `todo-grid` 持久内容的断言（run 收尾后会被轮询覆盖，导致非稳定失败）。
+
+### outputs
+- `portal/playwright.config.ts`
+- `portal/e2e/tests/chat-workbench.real-smoke.spec.ts`
+- `scripts/e2e-portal-real-smoke.sh`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `cd portal && npm run lint && npm run typecheck`
+  - `bash scripts/e2e-portal-real-smoke.sh`
+  - `bash scripts/pre-commit-check.sh`
+- results:
+  - portal lint/typecheck 通过。
+  - real-backend Playwright smoke 通过（1/1）。
+  - 全仓 pre-commit 检查通过。
+
+### gate_result
+- **Pass**（portal 已具备真实后端 smoke 验证闭环）
+
+### risks
+- 该 smoke 使用 `scripted provider` 聚焦链路连通性，不覆盖真实 LLM 行为波动与长会话压力。
+- 目前 real smoke 仅覆盖单浏览器、单场景；后续可扩展多场景与并发压测。
+
+### next_phase
+- Phase 21：真实 provider 模式下的 portal 对话压测（限流/超时/重连）与 flaky 收敛。
