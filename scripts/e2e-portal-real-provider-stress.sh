@@ -483,6 +483,12 @@ parse_sse_result() {
           suggestion: "inspect provider terminal reason and map cancellation causes (quota/network/policy)",
         };
       }
+      if (lowered.includes("session.error")) {
+        return {
+          failureClass: "provider_session_error",
+          suggestion: "inspect provider-specific session error payload and upstream model gateway logs",
+        };
+      }
       if (outcome === "failed" && messageCount === 0) {
         return {
           failureClass: "provider_no_output",
