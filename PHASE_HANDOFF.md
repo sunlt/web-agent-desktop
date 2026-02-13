@@ -1626,3 +1626,47 @@
 
 ### next_phase
 - Phase 21 后续子阶段：补 provider 凭据健康检查脚本与 CI 失败提示模板，区分“环境未就绪”与“能力回归”。
+
+## Phase 22: Executor Runtime 边界收口（control-plane 依赖清理）
+
+### objective
+- 彻底消除 `control-plane` 对本地 provider runtime 的代码与依赖耦合，保证 provider 执行仅发生在 `executor`。
+
+### inputs
+- `EXECUTOR_PROVIDER_RUNTIME_REFACTOR_PLAN.md`（A~D 已完成）
+- 用户明确要求：`control-plane` 不需要 provider CLI，执行统一下沉 executor。
+
+### actions
+- 删除 `control-plane` 内已废弃的本地 provider 实现：
+  - `src/providers/claude-code-provider.ts`
+  - `src/providers/opencode-provider.ts`
+  - `src/providers/codex-cli-provider.ts`
+  - `src/providers/runtime-utils.ts`
+- 更新 provider registry 测试，改为使用 `scripted` adapters，去除对本地 provider 类的依赖。
+- 通过 `npm uninstall` 移除 `control-plane` 的 `ai-sdk-provider-*` 依赖并更新 lockfile。
+- 同步更新重构计划文档执行状态（补 Phase E）。
+
+### outputs
+- `control-plane/package.json`
+- `control-plane/package-lock.json`
+- `control-plane/test/provider-registry.test.ts`
+- `EXECUTOR_PROVIDER_RUNTIME_REFACTOR_PLAN.md`
+
+### validation
+- commands:
+  - `cd control-plane && npm run lint`
+  - `cd control-plane && npm run typecheck`
+  - `cd control-plane && npm test`
+- results:
+  - lint 通过。
+  - typecheck 通过。
+  - test 通过（`22` files，`48 passed`，`3 skipped`）。
+
+### gate_result
+- **Pass**（control-plane 已不再持有本地 provider runtime 依赖）
+
+### risks
+- `ProviderKind` 仍保留历史命名 `codex-cli`，当前语义是“provider 类型标识”，非“control-plane 本地 CLI 执行”；后续可在协议层统一重命名以降低歧义。
+
+### next_phase
+- 对照 `设计.md` 做“实质未完成项”复盘，明确仅剩任务并按优先级推进（优先真实 provider flaky 收敛与协议命名收口）。

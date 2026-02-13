@@ -458,5 +458,5 @@
 14. Phase 21（进行中）
 
 ## 当前阶段
-- `in_progress`: Phase 21（真实 Provider 压测基线与 Flaky 收敛）
-- `next_commit`: `feat(phase-21): add dozzle and unified logs tool for multi-service troubleshooting`
+- `in_progress`: Phase 22（Executor Runtime 边界收口：control-plane 去本地 provider 依赖）
+- `next_commit`: `refactor(phase-22): remove local ai-sdk provider runtime from control-plane`

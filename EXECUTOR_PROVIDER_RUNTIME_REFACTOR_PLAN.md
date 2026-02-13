@@ -80,6 +80,23 @@
 验收：
 - 健康检查基于 `executor-manager/executor` 而非 `control-plane` 本地 CLI。
 
+### Phase E：control-plane 残留 provider 依赖清理
+
+目标：彻底移除 `control-plane` 本地 provider runtime 代码与 `ai-sdk-provider-*` 依赖，确保 provider 执行职责仅在 `executor`。
+
+范围：
+- `control-plane/src/providers/claude-code-provider.ts`（删除）
+- `control-plane/src/providers/opencode-provider.ts`（删除）
+- `control-plane/src/providers/codex-cli-provider.ts`（删除）
+- `control-plane/src/providers/runtime-utils.ts`（删除）
+- `control-plane/test/provider-registry.test.ts`
+- `control-plane/package.json`
+- `control-plane/package-lock.json`
+
+验收：
+- `control-plane` 源码不再 import `ai-sdk-provider-*`。
+- `npm run lint && npm run typecheck && npm test`（control-plane）通过。
+
 ## 4. 兼容与回滚策略
 
 1. 保留 `CONTROL_PLANE_PROVIDER_MODE=scripted` 作为测试与回滚保底。
@@ -92,7 +109,10 @@
 2. 提交信息：`feat(phase-executor-runtime-<x>): ...`。
 3. `PHASE_HANDOFF.md` 追加每阶段 gate 结果与剩余风险。
 
-## 6. 当前执行顺序
+## 6. 执行状态
 
-按 A -> B -> C -> D 串行推进。
-
+- Phase A：已完成（commit: `7413478`）
+- Phase B：已完成（commit: `7413478`）
+- Phase C：已完成（commit: `7413478` + `c0b36e2` + `41c3caf`）
+- Phase D：已完成（commit: `f38f9aa`）
+- Phase E：进行中（本次提交）
