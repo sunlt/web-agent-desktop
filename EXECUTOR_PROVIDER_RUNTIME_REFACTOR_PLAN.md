@@ -140,6 +140,21 @@
 - 压测失败样本内 `sse.raw.txt` 非空并包含完整事件。
 - 压测报告可从 `unknown_failure` 收敛到可操作分类（如 `auth_missing`）。
 
+### Phase H：凭据治理与超时基线收敛
+
+目标：将真实 provider 路径从“能诊断”推进到“可稳定门禁”，区分环境未就绪与真实回归，并降低短超时导致的假失败。
+
+范围：
+- `.github/workflows/ci.yml`
+- `scripts/provider-runtime-health-check.sh`
+- `scripts/e2e-portal-real-provider-stress.sh`
+
+验收：
+- CI `compose up` 步骤显式注入 provider secrets。
+- health-check 报告包含 `readinessCategory/blockingReason`（`ready`/`environment_not_ready`/`runtime_unhealthy`）。
+- stress 脚本正确记录 `curlExit`，超时归类为 `timeout`（不再误报 `unknown_failure`）。
+- 实测本机凭据（`~/.codex/auth.json` 注入 executor）下，长超时窗口可得到 `succeeded` 样本。
+
 ## 4. 兼容与回滚策略
 
 1. 保留 `CONTROL_PLANE_PROVIDER_MODE=scripted` 作为测试与回滚保底。
@@ -160,4 +175,5 @@
 - Phase D：已完成（commit: `f38f9aa`）
 - Phase E：已完成（commit: `e4ece48`）
 - Phase F：已完成（commit: `958ff43`）
-- Phase G：进行中（本次提交）
+- Phase G：已完成（commit: `55a28ce`）
+- Phase H：进行中（本次提交）

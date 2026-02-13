@@ -148,6 +148,23 @@ report="$(CHECKS_FILE="$checks_tmp" PROVIDER="$PROVIDER" RUNTIME_CONTAINER="$RUN
     .map((line) => JSON.parse(line));
   const failed = checks.filter((item) => item.status === "fail");
   const warned = checks.filter((item) => item.status === "warn");
+  const failedNames = failed.map((item) => item.name);
+  const authRelated = new Set([
+    "provider_auth_ready",
+    "provider_auth_env",
+    "provider_auth_file",
+  ]);
+  const ready = failed.length === 0;
+  const readinessCategory = ready
+    ? "ready"
+    : failedNames.every((name) => authRelated.has(name))
+      ? "environment_not_ready"
+      : "runtime_unhealthy";
+  const blockingReason = ready
+    ? null
+    : readinessCategory === "environment_not_ready"
+      ? "provider auth not ready"
+      : `failed checks: ${failedNames.join(", ")}`;
   const report = {
     generatedAt: new Date().toISOString(),
     provider: process.env.PROVIDER,
@@ -155,8 +172,10 @@ report="$(CHECKS_FILE="$checks_tmp" PROVIDER="$PROVIDER" RUNTIME_CONTAINER="$RUN
     controlPlaneContainer: process.env.CONTROL_PLANE_CONTAINER,
     executorManagerContainer: process.env.EXECUTOR_MANAGER_CONTAINER,
     executorManagerHealthUrl: process.env.EXECUTOR_MANAGER_HEALTH_URL,
-    ready: failed.length === 0,
-    failedChecks: failed.map((item) => item.name),
+    ready,
+    readinessCategory,
+    blockingReason,
+    failedChecks: failedNames,
     warnedChecks: warned.map((item) => item.name),
     checks,
   };

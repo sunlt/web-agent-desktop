@@ -63,8 +63,8 @@ COMPOSE_SERVICES=(
 )
 
 ITERATIONS="${STRESS_ITERATIONS:-5}"
-RUN_TIMEOUT_SEC="${STRESS_RUN_TIMEOUT_SEC:-90}"
-PRECHECK_TIMEOUT_SEC="${STRESS_PRECHECK_TIMEOUT_SEC:-45}"
+RUN_TIMEOUT_SEC="${STRESS_RUN_TIMEOUT_SEC:-180}"
+PRECHECK_TIMEOUT_SEC="${STRESS_PRECHECK_TIMEOUT_SEC:-90}"
 PROVIDER="${STRESS_PROVIDER:-codex-app-server}"
 MODEL="${STRESS_MODEL:-gpt-5.1-codex}"
 REQUIRE_HUMAN_LOOP="${STRESS_REQUIRE_HUMAN_LOOP:-0}"
@@ -210,27 +210,32 @@ check_provider_runtime() {
   local cli_name=""
   local auth_check_cmd=""
   local auth_hint=""
+  local auth_env_name=""
 
   case "$PROVIDER" in
     codex-cli|codex-app-server)
       cli_name="codex"
       auth_check_cmd='[ -f /root/.codex/auth.json ] || [ -f /root/.codex/config.json ]'
       auth_hint="check /root/.codex/auth.json or /root/.codex/config.json"
+      auth_env_name="OPENAI_API_KEY"
       ;;
     claude-code)
       cli_name="claude"
       auth_check_cmd='[ -f /root/.claude.json ] || [ -d /root/.config/claude ]'
       auth_hint="check /root/.claude.json or /root/.config/claude"
+      auth_env_name="ANTHROPIC_API_KEY"
       ;;
     opencode)
       cli_name="opencode"
       auth_check_cmd=''
       auth_hint="no explicit auth file check configured"
+      auth_env_name="OPENAI_API_KEY"
       ;;
     *)
       cli_name="$PROVIDER"
       auth_check_cmd=''
       auth_hint="unknown provider; skip auth file check"
+      auth_env_name=""
       ;;
   esac
 
@@ -251,13 +256,34 @@ check_provider_runtime() {
   fi
 
   if [[ -n "$auth_check_cmd" ]]; then
+    auth_file_ok="0"
     if docker exec "$PROVIDER_RUNTIME_CONTAINER" sh -lc "$auth_check_cmd" >/dev/null 2>&1; then
+      auth_file_ok="1"
       record_runtime_check "provider_auth_hint" "pass" "auth footprint exists (${auth_hint})"
     else
       record_runtime_check "provider_auth_hint" "warn" "auth footprint missing (${auth_hint})"
     fi
   else
+    auth_file_ok="0"
     record_runtime_check "provider_auth_hint" "warn" "$auth_hint"
+  fi
+
+  auth_env_ok="0"
+  if [[ -n "$auth_env_name" ]]; then
+    if docker exec "$PROVIDER_RUNTIME_CONTAINER" sh -lc "[ -n \"\${${auth_env_name}:-}\" ]" >/dev/null 2>&1; then
+      auth_env_ok="1"
+      record_runtime_check "provider_auth_env" "pass" "${auth_env_name} present in ${PROVIDER_RUNTIME_CONTAINER}"
+    else
+      record_runtime_check "provider_auth_env" "warn" "${auth_env_name} missing in ${PROVIDER_RUNTIME_CONTAINER}"
+    fi
+  else
+    record_runtime_check "provider_auth_env" "warn" "no auth env check configured for provider ${PROVIDER}"
+  fi
+
+  if [[ "$auth_file_ok" == "0" && "$auth_env_ok" == "0" ]]; then
+    record_runtime_check "provider_auth_ready" "fail" "neither auth file nor auth env is ready for provider ${PROVIDER}"
+  else
+    record_runtime_check "provider_auth_ready" "pass" "provider auth source is available"
   fi
 }
 
@@ -520,7 +546,8 @@ run_single_case() {
   local sse_payload=""
   err_file="$(mktemp)"
 
-  if ! sse_payload=$(curl -sS -N \
+  set +e
+  sse_payload=$(curl -sS -N \
     --max-time "$timeout_sec" \
     -X POST \
     -H 'accept: text/event-stream' \
@@ -529,9 +556,9 @@ run_single_case() {
 {"runId":"${run_id}","provider":"${PROVIDER}","model":"${MODEL}","messages":[{"role":"user","content":"${prompt}"}],"requireHumanLoop":$( [[ "$REQUIRE_HUMAN_LOOP" == "1" ]] && echo "true" || echo "false" )}
 JSON
 )" \
-    "http://127.0.0.1:3001/api/runs/start" 2>"$err_file"); then
-    curl_exit=$?
-  fi
+    "http://127.0.0.1:3001/api/runs/start" 2>"$err_file")
+  curl_exit=$?
+  set -e
 
   local parse_result
   parse_result="$(parse_sse_result "$sse_payload" "$curl_exit" "$run_id" "$stage")"

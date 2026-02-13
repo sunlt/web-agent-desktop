@@ -458,5 +458,5 @@
 14. Phase 21（进行中）
 
 ## 当前阶段
-- `in_progress`: Phase 24（真实 Provider 失败可诊断性收敛：reason 透传 + 证据归档修复）
-- `next_commit`: `fix(phase-21): improve real-provider failure diagnostics and artifact capture`
+- `in_progress`: Phase 25（真实 Provider 凭据治理与超时基线收敛）
+- `next_commit`: `fix(phase-21): harden provider readiness gate and timeout baseline in CI/stress`

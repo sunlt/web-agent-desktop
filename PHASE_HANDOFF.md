@@ -1786,3 +1786,65 @@
 
 ### next_phase
 - Phase 25：真实 provider 凭据与模型可用性治理（容器内凭据注入策略、health gate 强化、CI strict 条件化启用）。
+
+## Phase 25: 真实 Provider 凭据治理与超时基线收敛
+
+### objective
+- 把真实 provider 门禁从“仅可观测”推进到“可稳定区分环境问题与能力回归”，并收敛短超时导致的误报。
+
+### inputs
+- 已完成 Phase 24：失败原因透传与证据归档修复。
+- 用户确认可读取本机 provider 凭据进行实测。
+- 近期样本显示：无凭据为 `auth_missing`，有凭据时短超时会误判 `stream_incomplete`。
+
+### actions
+- CI 强化：
+  - 在 `Prepare phase21 real-provider stack` 步骤显式传入 `OPENAI_API_KEY/ANTHROPIC_API_KEY` secrets，确保容器启动即携带凭据。
+  - 增强 health precheck 输出：新增 `readinessCategory/blockingReason` 并写入 `GITHUB_OUTPUT` 与 Step Summary。
+  - `health strict` 失败时按类别给出不同报错标题：
+    - `environment_not_ready` -> 环境未就绪
+    - `runtime_unhealthy` -> 能力回归
+  - 新增 CI 可配置超时变量并透传给 stress：
+    - `CI_PHASE21_REAL_PROVIDER_PRECHECK_TIMEOUT_SEC`（默认 90）
+    - `CI_PHASE21_REAL_PROVIDER_RUN_TIMEOUT_SEC`（默认 180）
+- health-check 脚本增强：
+  - 报告新增 `readinessCategory` 与 `blockingReason`。
+- stress 脚本增强：
+  - 修复 `curl` 退出码采集 bug（此前 timeout 时误记为 `0`）。
+  - provider 预检补齐 `provider_auth_env/provider_auth_ready` 检查。
+  - 默认超时基线上调：`PRECHECK_TIMEOUT_SEC 45->90`，`RUN_TIMEOUT_SEC 90->180`。
+- 本机凭据实测：
+  - 临时将 `~/.codex/auth.json` 注入 `executor:/root/.codex/auth.json`。
+  - 验证结果：
+    - 短超时（30s）可稳定归类 `timeout`（不再是 `unknown_failure`）。
+    - 长超时（180s）得到 `succeeded` 样本，说明认证与链路可用。
+
+### outputs
+- `.github/workflows/ci.yml`
+- `scripts/provider-runtime-health-check.sh`
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `EXECUTOR_PROVIDER_RUNTIME_REFACTOR_PLAN.md`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `bash -n scripts/e2e-portal-real-provider-stress.sh`
+  - `bash -n scripts/provider-runtime-health-check.sh`
+  - `PROVIDER_HEALTH_OUT=/tmp/provider-health.json PROVIDER_HEALTH_STRICT=0 bash scripts/provider-runtime-health-check.sh`
+  - `STRESS_SKIP_COMPOSE_UP=1 STRESS_ITERATIONS=1 STRESS_PRECHECK_TIMEOUT_SEC=30 STRESS_RUN_TIMEOUT_SEC=30 STRESS_STRICT=0 bash scripts/e2e-portal-real-provider-stress.sh`
+  - `STRESS_SKIP_COMPOSE_UP=1 STRESS_PRECHECK_ENABLED=0 STRESS_ITERATIONS=1 STRESS_RUN_TIMEOUT_SEC=180 STRESS_STRICT=0 bash scripts/e2e-portal-real-provider-stress.sh`
+- results:
+  - 脚本语法检查通过。
+  - health 报告字段新增成功（`ready/readinessCategory/blockingReason`）。
+  - 30s 窗口下分类为 `timeout`（`curlExit=28`）。
+  - 180s 窗口下出现 `succeeded`（`successRate=1`）。
+
+### gate_result
+- **Pass**（环境未就绪与能力回归可区分，且真实 provider 在凭据+合理超时下可成功）
+
+### risks
+- 当前成功样本依赖本机注入的 `~/.codex/auth.json`；CI/团队环境需统一凭据分发策略（secret/env 或挂载）。
+- 对于长推理/多工具回合任务，180s 仍可能不足；后续需按 provider/model 建议值分层配置。
+
+### next_phase
+- Phase 26：将本机凭据注入能力产品化为可控选项（仅本地调试启用），并补充 provider/model 维度的超时模板。
