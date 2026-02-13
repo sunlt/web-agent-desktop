@@ -419,6 +419,9 @@
 - [x] 增加 provider 运行时预检（容器存在、provider 二进制存在、`--version`、凭据 footprint）。
 - [x] 增加 preflight 试运行 + 失败分类（`failureClass`）+ 修复建议（`suggestion`）输出。
 - [x] 增加可选自动降级探针（预检失败时可切 scripted probe），并输出 Markdown 报告摘要。
+- [x] 增加失败样本自动归档（runId 级别），落盘 `result/sse/raw logs` 证据集。
+- [x] 增加跨服务日志抓取（`gateway/control-plane/executor-manager/executor`）并写入归档目录。
+- [x] 报告新增 `failureArtifacts` 列表与 `failureArtifactCount`，支持按样本路径快速回溯。
 
 **Verification Criteria**:
 - [x] `bash scripts/e2e-portal-real-provider-stress.sh` 可执行并输出报告。
@@ -447,4 +450,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 21（真实 Provider 压测基线与 Flaky 收敛）
-- `next_commit`: `test(phase-21): add provider precheck and failure classification to stress script`
+- `next_commit`: `test(phase-21): archive failure samples and service logs in stress reports`

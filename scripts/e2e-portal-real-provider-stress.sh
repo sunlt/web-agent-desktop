@@ -73,18 +73,28 @@ STRICT_MODE="${STRESS_STRICT:-0}"
 PRECHECK_ENABLED="${STRESS_PRECHECK_ENABLED:-1}"
 AUTO_FALLBACK_SCRIPTED="${STRESS_AUTO_FALLBACK_SCRIPTED:-0}"
 FALLBACK_RUN_TIMEOUT_SEC="${STRESS_FALLBACK_TIMEOUT_SEC:-45}"
+ARCHIVE_ENABLED="${STRESS_ARCHIVE_ENABLED:-1}"
+ARCHIVE_MAX_FAILURES="${STRESS_ARCHIVE_MAX_FAILURES:-3}"
+ARCHIVE_LOG_SERVICES="${STRESS_ARCHIVE_LOG_SERVICES:-gateway control-plane executor-manager executor}"
+ARCHIVE_LOG_TAIL="${STRESS_ARCHIVE_LOG_TAIL:-250}"
 REPORT_DIR="${STRESS_REPORT_DIR:-observability/reports}"
 
 mkdir -p "$REPORT_DIR"
 report_path="${REPORT_DIR}/phase21-provider-stress-$(date +%Y%m%d-%H%M%S).json"
 report_md_path="${report_path%.json}.md"
+artifact_dir="${report_path%.json}-artifacts"
+mkdir -p "$artifact_dir"
 results_tmp="$(mktemp)"
 runtime_checks_tmp="$(mktemp)"
 preflight_tmp="$(mktemp)"
 fallback_tmp="$(mktemp)"
+artifacts_tmp="$(mktemp)"
+LAST_SSE_PAYLOAD=""
+LAST_CURL_ERROR=""
+archived_failure_count=0
 
 cleanup() {
-  rm -f "$results_tmp" "$runtime_checks_tmp" "$preflight_tmp" "$fallback_tmp"
+  rm -f "$results_tmp" "$runtime_checks_tmp" "$preflight_tmp" "$fallback_tmp" "$artifacts_tmp"
 }
 trap cleanup EXIT
 
@@ -97,6 +107,84 @@ record_runtime_check() {
     process.stdout.write(JSON.stringify({ name, status, detail }));
   ' "$name" "$status" "$detail" >>"$runtime_checks_tmp"
   printf '\n' >>"$runtime_checks_tmp"
+}
+
+json_field() {
+  local json="$1"
+  local key="$2"
+  printf '%s' "$json" | KEY="$key" node -e '
+    const fs = require("node:fs");
+    const key = process.env.KEY || "";
+    const value = JSON.parse(fs.readFileSync(0, "utf8"))?.[key];
+    process.stdout.write(value === undefined || value === null ? "" : String(value));
+  '
+}
+
+capture_failure_artifact() {
+  local stage="$1"
+  local run_id="$2"
+  local run_result="$3"
+  local run_start_epoch="$4"
+
+  if [[ "$ARCHIVE_ENABLED" != "1" ]]; then
+    return 0
+  fi
+  if (( archived_failure_count >= ARCHIVE_MAX_FAILURES )); then
+    return 0
+  fi
+
+  local safe_run_id
+  safe_run_id="$(printf '%s' "$run_id" | tr '/: ' '___')"
+  local sample_dir="${artifact_dir}/${stage}-${safe_run_id}"
+  mkdir -p "$sample_dir"
+
+  printf '%s\n' "$run_result" >"${sample_dir}/result.json"
+  printf '%s\n' "${LAST_SSE_PAYLOAD:-}" >"${sample_dir}/sse.raw.txt"
+  if [[ -n "${LAST_CURL_ERROR:-}" ]]; then
+    printf '%s\n' "$LAST_CURL_ERROR" >"${sample_dir}/curl.stderr.txt"
+  fi
+  if [[ -s "$runtime_checks_tmp" ]]; then
+    cp "$runtime_checks_tmp" "${sample_dir}/runtime-checks.ndjson"
+  fi
+
+  local since_iso
+  since_iso="$(node -e '
+    const s = Number(process.argv[1] || "0");
+    const ts = Math.max(0, (s - 2) * 1000);
+    process.stdout.write(new Date(ts).toISOString());
+  ' "$run_start_epoch")"
+
+  for service in $ARCHIVE_LOG_SERVICES; do
+    if docker inspect "$service" >/dev/null 2>&1; then
+      docker logs --since "$since_iso" --tail "$ARCHIVE_LOG_TAIL" "$service" >"${sample_dir}/${service}.log" 2>&1 || true
+    else
+      printf 'service_not_found\n' >"${sample_dir}/${service}.log"
+    fi
+  done
+
+  local outcome
+  local failure_class
+  local detail
+  outcome="$(json_field "$run_result" "outcome")"
+  failure_class="$(json_field "$run_result" "failureClass")"
+  detail="$(json_field "$run_result" "detail")"
+
+  node -e '
+    const [stage, runId, outcome, failureClass, detail, sampleDir] = process.argv.slice(1);
+    process.stdout.write(
+      JSON.stringify({
+        stage,
+        runId,
+        outcome,
+        failureClass,
+        detail,
+        artifactPath: sampleDir,
+      }),
+    );
+  ' "$stage" "$run_id" "$outcome" "$failure_class" "$detail" "$sample_dir" >>"$artifacts_tmp"
+  printf '\n' >>"$artifacts_tmp"
+
+  archived_failure_count=$((archived_failure_count + 1))
 }
 
 check_provider_runtime() {
@@ -421,6 +509,9 @@ JSON
   curl_err_text="$(cat "$err_file" || true)"
   rm -f "$err_file"
 
+  LAST_SSE_PAYLOAD="$sse_payload"
+  LAST_CURL_ERROR="$curl_err_text"
+
   if [[ -n "$curl_err_text" ]]; then
     parse_result=$(printf '%s' "$parse_result" | CURL_ERR="$curl_err_text" node -e '
       const fs = require("node:fs");
@@ -441,13 +532,21 @@ run_scripted_fallback_probe() {
 
   local fallback_run_id
   local fallback_prompt
+  local fallback_start_epoch
   fallback_run_id="run-phase21-fallback-$(date +%s)"
   fallback_prompt="phase21-fallback-$(date +%s)"
+  fallback_start_epoch="$(date +%s)"
 
   local fallback_result
   fallback_result="$(run_single_case "$fallback_run_id" "$fallback_prompt" "$FALLBACK_RUN_TIMEOUT_SEC" "fallback-scripted")"
   echo "$fallback_result" >"$fallback_tmp"
   log "fallback result: $fallback_result"
+
+  local fallback_outcome
+  fallback_outcome="$(json_field "$fallback_result" "outcome")"
+  if [[ "$fallback_outcome" != "succeeded" ]]; then
+    capture_failure_artifact "fallback-scripted" "$fallback_run_id" "$fallback_result" "$fallback_start_epoch"
+  fi
 
   log "restore control-plane to real mode"
   CONTROL_PLANE_PROVIDER_MODE=real docker compose up -d --build control-plane gateway >/dev/null
@@ -467,6 +566,7 @@ wait_for_health "portal" "http://127.0.0.1/"
 check_provider_runtime
 
 if [[ "$PRECHECK_ENABLED" == "1" ]]; then
+  preflight_start_epoch="$(date +%s)"
   preflight_run_id="run-phase21-precheck-$(date +%s)"
   preflight_prompt="phase21-precheck-$(date +%s)"
   log "preflight run: runId=${preflight_run_id}, timeout=${PRECHECK_TIMEOUT_SEC}s"
@@ -475,6 +575,9 @@ if [[ "$PRECHECK_ENABLED" == "1" ]]; then
   log "preflight result: $preflight_result"
 
   preflight_outcome="$(printf '%s' "$preflight_result" | node -e 'const fs=require("node:fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));process.stdout.write(data.outcome || "unknown");')"
+  if [[ "$preflight_outcome" != "succeeded" ]]; then
+    capture_failure_artifact "preflight" "$preflight_run_id" "$preflight_result" "$preflight_start_epoch"
+  fi
   if [[ "$preflight_outcome" != "succeeded" && "$AUTO_FALLBACK_SCRIPTED" == "1" ]]; then
     run_scripted_fallback_probe
   fi
@@ -483,6 +586,7 @@ fi
 log "stress config: iterations=${ITERATIONS}, provider=${PROVIDER}, model=${MODEL}, timeout=${RUN_TIMEOUT_SEC}s, strict=${STRICT_MODE}"
 
 for ((i = 1; i <= ITERATIONS; i += 1)); do
+  run_start_epoch="$(date +%s)"
   run_id="run-phase21-$(date +%s)-${i}"
   prompt="phase21-provider-stress-${i}-$(date +%s)"
   log "run ${i}/${ITERATIONS}: runId=${run_id}"
@@ -490,14 +594,20 @@ for ((i = 1; i <= ITERATIONS; i += 1)); do
 
   echo "$parse_result" >> "$results_tmp"
   log "run result: $parse_result"
+
+  run_outcome="$(json_field "$parse_result" "outcome")"
+  if [[ "$run_outcome" != "succeeded" ]]; then
+    capture_failure_artifact "stress" "$run_id" "$parse_result" "$run_start_epoch"
+  fi
 done
 
-summary_json=$(RESULTS_FILE="$results_tmp" RUNTIME_CHECKS_FILE="$runtime_checks_tmp" PRECHECK_FILE="$preflight_tmp" FALLBACK_FILE="$fallback_tmp" REPORT_PATH="$report_path" REPORT_MD_PATH="$report_md_path" ITERATIONS="$ITERATIONS" PROVIDER="$PROVIDER" MODEL="$MODEL" REQUIRE_HUMAN_LOOP="$REQUIRE_HUMAN_LOOP" RUN_TIMEOUT_SEC="$RUN_TIMEOUT_SEC" STRICT_MODE="$STRICT_MODE" THRESHOLD="$SUCCESS_RATE_THRESHOLD" node -e '
+summary_json=$(RESULTS_FILE="$results_tmp" RUNTIME_CHECKS_FILE="$runtime_checks_tmp" PRECHECK_FILE="$preflight_tmp" FALLBACK_FILE="$fallback_tmp" ARTIFACTS_FILE="$artifacts_tmp" REPORT_PATH="$report_path" REPORT_MD_PATH="$report_md_path" ARTIFACT_DIR="$artifact_dir" ARCHIVE_ENABLED="$ARCHIVE_ENABLED" ARCHIVE_MAX_FAILURES="$ARCHIVE_MAX_FAILURES" ARCHIVE_LOG_SERVICES="$ARCHIVE_LOG_SERVICES" ARCHIVE_LOG_TAIL="$ARCHIVE_LOG_TAIL" ITERATIONS="$ITERATIONS" PROVIDER="$PROVIDER" MODEL="$MODEL" REQUIRE_HUMAN_LOOP="$REQUIRE_HUMAN_LOOP" RUN_TIMEOUT_SEC="$RUN_TIMEOUT_SEC" STRICT_MODE="$STRICT_MODE" THRESHOLD="$SUCCESS_RATE_THRESHOLD" node -e '
   const fs = require("node:fs");
   const resultsFile = process.env.RESULTS_FILE;
   const runtimeChecksFile = process.env.RUNTIME_CHECKS_FILE;
   const precheckFile = process.env.PRECHECK_FILE;
   const fallbackFile = process.env.FALLBACK_FILE;
+  const artifactsFile = process.env.ARTIFACTS_FILE;
   const reportPath = process.env.REPORT_PATH;
   const reportMdPath = process.env.REPORT_MD_PATH;
   const rows = fs
@@ -518,6 +628,12 @@ summary_json=$(RESULTS_FILE="$results_tmp" RUNTIME_CHECKS_FILE="$runtime_checks_
   const fallbackText = fs.readFileSync(fallbackFile, "utf8").trim();
   const preflight = precheckText ? JSON.parse(precheckText) : null;
   const fallbackProbe = fallbackText ? JSON.parse(fallbackText) : null;
+  const failureArtifacts = fs
+    .readFileSync(artifactsFile, "utf8")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 
   const total = rows.length;
   const count = (name) => rows.filter((item) => item.outcome === name).length;
@@ -560,10 +676,20 @@ summary_json=$(RESULTS_FILE="$results_tmp" RUNTIME_CHECKS_FILE="$runtime_checks_
       mode: "real-provider",
       strictMode,
       successRateThreshold: threshold,
+      archive: {
+        enabled: process.env.ARCHIVE_ENABLED === "1",
+        maxFailures: Number(process.env.ARCHIVE_MAX_FAILURES || "0"),
+        logServices: String(process.env.ARCHIVE_LOG_SERVICES || "")
+          .split(/\s+/)
+          .filter(Boolean),
+        logTail: Number(process.env.ARCHIVE_LOG_TAIL || "0"),
+        artifactDir: process.env.ARTIFACT_DIR,
+      },
     },
     preflight,
     fallbackProbe,
     runtimeChecks,
+    failureArtifacts,
     summary: {
       total,
       succeeded,
@@ -576,6 +702,7 @@ summary_json=$(RESULTS_FILE="$results_tmp" RUNTIME_CHECKS_FILE="$runtime_checks_
       failureClassCounts,
       topFailures,
       suggestions,
+      failureArtifactCount: failureArtifacts.length,
     },
     runs: rows,
   };
@@ -591,6 +718,9 @@ summary_json=$(RESULTS_FILE="$results_tmp" RUNTIME_CHECKS_FILE="$runtime_checks_
     `- iterations: ${report.config.iterations}`,
     `- strictMode: ${report.config.strictMode}`,
     `- successRateThreshold: ${report.config.successRateThreshold}`,
+    `- archiveEnabled: ${report.config.archive.enabled}`,
+    `- archiveMaxFailures: ${report.config.archive.maxFailures}`,
+    `- artifactDir: ${report.config.archive.artifactDir}`,
     "",
     "## Summary",
     "",
@@ -602,6 +732,7 @@ summary_json=$(RESULTS_FILE="$results_tmp" RUNTIME_CHECKS_FILE="$runtime_checks_
     `- transportError: ${report.summary.transportError}`,
     `- incomplete: ${report.summary.incomplete}`,
     `- successRate: ${report.summary.successRate}`,
+    `- failureArtifactCount: ${report.summary.failureArtifactCount}`,
     "",
     "## Top Failures",
     "",
@@ -627,6 +758,15 @@ summary_json=$(RESULTS_FILE="$results_tmp" RUNTIME_CHECKS_FILE="$runtime_checks_
       ? `- outcome=${report.fallbackProbe.outcome}, class=${report.fallbackProbe.failureClass}, detail=${report.fallbackProbe.detail}`
       : "- fallback not executed",
     "",
+    "## Failure Artifacts",
+    "",
+    ...(report.failureArtifacts.length > 0
+      ? report.failureArtifacts.map(
+          (item) =>
+            `- [${item.stage}] runId=${item.runId}, class=${item.failureClass}, path=${item.artifactPath}`,
+        )
+      : ["- none"]),
+    "",
   ].join("\n");
   fs.writeFileSync(reportMdPath, md);
 
@@ -636,6 +776,7 @@ summary_json=$(RESULTS_FILE="$results_tmp" RUNTIME_CHECKS_FILE="$runtime_checks_
 log "stress summary: ${summary_json}"
 log "stress report written: ${report_path}"
 log "stress markdown summary written: ${report_md_path}"
+log "stress failure artifacts dir: ${artifact_dir}"
 
 pass_check=$(printf '%s' "$summary_json" | THRESHOLD="$SUCCESS_RATE_THRESHOLD" node -e '
   const fs = require("node:fs");

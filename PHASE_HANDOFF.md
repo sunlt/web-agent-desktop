@@ -1468,3 +1468,58 @@
 
 ### next_phase
 - Phase 21 后续子阶段：增加跨服务日志抓取与失败样本自动归档（runId 级别），并在 CI 引入可选 strict 门禁阈值。
+
+---
+
+## Phase 21: 真实 Provider 压测收敛（失败样本归档）
+
+### objective
+- 将真实 provider 压测从“有分类结果”提升到“可直接排障”：失败自动留证、跨服务日志自动采集、报告内直达样本路径。
+
+### inputs
+- 上一子阶段已完成 precheck/preflight/failureClass/suggestion。
+- 当前失败仍集中在 `provider_no_output`，需要 runId 级证据集辅助定位。
+
+### actions
+- 增强 `scripts/e2e-portal-real-provider-stress.sh`：
+  - 新增失败样本归档目录：`${report_basename}-artifacts/`。
+  - 失败 run 自动保存：
+    - `result.json`（解析后结果）
+    - `sse.raw.txt`（原始 SSE）
+    - `runtime-checks.ndjson`
+  - 新增跨服务日志抓取（默认 `gateway/control-plane/executor-manager/executor`）：
+    - 支持 `--since` 按 run 起始时间切片
+    - 支持 `STRESS_ARCHIVE_LOG_TAIL` 控制日志行数
+  - 归档策略支持 ENV 配置：
+    - `STRESS_ARCHIVE_ENABLED`
+    - `STRESS_ARCHIVE_MAX_FAILURES`
+    - `STRESS_ARCHIVE_LOG_SERVICES`
+    - `STRESS_ARCHIVE_LOG_TAIL`
+  - 报告增强：
+    - JSON: `failureArtifacts[]` 与 `summary.failureArtifactCount`
+    - Markdown: 新增 `Failure Artifacts` 小节。
+- 执行脚本实跑，验证归档落盘与报告字段一致。
+
+### outputs
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `PHASE_HANDOFF.md`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `bash scripts/e2e-portal-real-provider-stress.sh`
+  - `bash scripts/pre-commit-check.sh`
+- results:
+  - 新报告：`observability/reports/phase21-provider-stress-20260213-101612.json`（含 `failureArtifactCount=3`）。
+  - 样本目录：`observability/reports/phase21-provider-stress-20260213-101612-artifacts/`（含 preflight + stress 失败样本及四服务日志）。
+  - 全仓 pre-commit 检查通过。
+
+### gate_result
+- **Pass**（失败样本自动归档与跨服务日志抓取已可用）
+
+### risks
+- 归档默认抓取固定尾部日志，若并发压测更高可能出现同窗口噪声；后续可补 traceId/runId 过滤提纯。
+- 样本归档数量默认上限为 3，极端场景下可能遗漏后续失败类型，需要按场景调高阈值。
+
+### next_phase
+- Phase 21 后续子阶段：在 CI 增加可选 strict 阈值执行档（仅在 provider 凭据就绪时启用），并输出失败样本摘要到 CI artifact。
