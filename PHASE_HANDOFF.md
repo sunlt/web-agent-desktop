@@ -1419,3 +1419,52 @@
 
 ### next_phase
 - Phase 21 后续子阶段：按失败画像逐项收敛（provider 凭据探测、启动前校验、失败可视化与自动降级策略）。
+
+---
+
+## Phase 21: 真实 Provider 压测收敛（预检/分类/建议）
+
+### objective
+- 在基线压测之上补齐“可诊断”能力：启动前预检、失败分类、修复建议与可选降级探针，降低 flaky 排障成本。
+
+### inputs
+- Phase 21 基线压测脚本已可输出成功率与基础失败统计。
+- 当前环境真实压测结果稳定为 `provider_no_output`，需要更细粒度定位信息。
+
+### actions
+- 增强 `scripts/e2e-portal-real-provider-stress.sh`：
+  - 新增 provider runtime 预检：
+    - executor 容器存在性
+    - provider 二进制可用性与版本
+    - auth footprint 检查（按 provider 差异化路径）
+  - 新增 preflight 试运行（在正式压测前先跑 1 次）。
+  - 统一 SSE 解析并输出失败分类与建议：
+    - 新增 `failureClass` 与 `suggestion`
+    - 覆盖 `transport_error/auth_missing/model_invalid/provider_no_output/...` 等类别
+  - 新增可选自动降级探针：
+    - `STRESS_AUTO_FALLBACK_SCRIPTED=1` 时，预检失败触发 scripted probe（随后恢复 real 模式）
+  - 新增 Markdown 报告输出（与 JSON 同名）。
+- 执行脚本与全仓门禁，确认增强无回归。
+
+### outputs
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `bash scripts/e2e-portal-real-provider-stress.sh`
+  - `bash scripts/pre-commit-check.sh`
+- results:
+  - 脚本完成 precheck + preflight + 5 轮压测并生成 JSON/Markdown 报告。
+  - 当前样本为 `provider_no_output`（5/5 failed），报告已包含失败分类计数与建议。
+  - 全仓 pre-commit 检查通过。
+
+### gate_result
+- **Pass**（Phase 21 子阶段“可诊断能力”已落地）
+
+### risks
+- 当前失败聚类仍集中在 `provider_no_output`，需要结合 executor/provider 内部日志进一步定位根因（凭据、模型可用性、网络策略或 provider 运行时行为）。
+- 自动降级探针默认关闭，CI 若需启用需明确策略以避免掩盖真实 provider 回归。
+
+### next_phase
+- Phase 21 后续子阶段：增加跨服务日志抓取与失败样本自动归档（runId 级别），并在 CI 引入可选 strict 门禁阈值。

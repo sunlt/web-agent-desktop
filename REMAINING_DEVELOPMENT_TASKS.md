@@ -416,6 +416,9 @@
   - 支持 `strict` 门禁（`STRESS_STRICT=1` + `STRESS_SUCCESS_RATE_THRESHOLD`）。
 - [x] 默认采用 non-strict 观测模式，避免本地凭据缺失时直接阻断迭代。
 - [x] 将压测报告目录加入 `.gitignore`（避免运行产物污染提交）。
+- [x] 增加 provider 运行时预检（容器存在、provider 二进制存在、`--version`、凭据 footprint）。
+- [x] 增加 preflight 试运行 + 失败分类（`failureClass`）+ 修复建议（`suggestion`）输出。
+- [x] 增加可选自动降级探针（预检失败时可切 scripted probe），并输出 Markdown 报告摘要。
 
 **Verification Criteria**:
 - [x] `bash scripts/e2e-portal-real-provider-stress.sh` 可执行并输出报告。
@@ -444,4 +447,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 21（真实 Provider 压测基线与 Flaky 收敛）
-- `next_commit`: `test(phase-21): add real-provider stress baseline script`
+- `next_commit`: `test(phase-21): add provider precheck and failure classification to stress script`
