@@ -108,6 +108,14 @@ export class ProviderRunner {
       requiresHumanLoop: Boolean(input.requireHumanLoop),
     });
 
+    logProviderRun("info", {
+      message: "provider run accepted",
+      runId: input.runId,
+      provider: input.provider,
+      requireHumanLoop: Boolean(input.requireHumanLoop),
+      resumeSessionId: resumeSessionId ?? null,
+    });
+
     return {
       runId: input.runId,
       accepted: true,
@@ -153,11 +161,12 @@ export class ProviderRunner {
             break;
           }
         }
-      } catch {
+      } catch (error) {
         if (!context.finalChunk) {
           this.publishChunk(context, {
             type: "run.finished",
             status: "failed",
+            reason: error instanceof Error ? error.message : String(error),
           });
         }
       } finally {
@@ -240,6 +249,13 @@ export class ProviderRunner {
       context.finalChunk = chunk;
       context.status = chunk.status;
       context.endedAt = new Date();
+      logProviderRun(chunk.status === "failed" ? "error" : "info", {
+        message: "provider run finished",
+        runId: context.runId,
+        provider: context.provider,
+        status: chunk.status,
+        reason: chunk.reason ?? null,
+      });
     }
 
     this.streamBus.publish(context.runId, {
@@ -255,11 +271,45 @@ export class ProviderRunner {
     if (context.closed) {
       return;
     }
-    context.closed = true;
     if (!context.finalChunk) {
-      context.status = "failed";
+      this.publishChunk(context, {
+        type: "run.finished",
+        status: "failed",
+        reason: "provider stream closed without terminal event",
+      });
+    }
+    if (!context.endedAt) {
       context.endedAt = new Date();
     }
+    context.closed = true;
+    logProviderRun("info", {
+      message: "provider run closed",
+      runId: context.runId,
+      provider: context.provider,
+      status: context.status,
+      endedAt: context.endedAt?.toISOString() ?? null,
+    });
     this.streamBus.close(context.runId);
   }
+}
+
+function logProviderRun(
+  level: "info" | "warn" | "error",
+  payload: Record<string, unknown>,
+): void {
+  const record = JSON.stringify({
+    level,
+    ts: new Date().toISOString(),
+    component: "executor-provider-runner",
+    ...payload,
+  });
+  if (level === "error") {
+    console.error(record);
+    return;
+  }
+  if (level === "warn") {
+    console.warn(record);
+    return;
+  }
+  console.info(record);
 }

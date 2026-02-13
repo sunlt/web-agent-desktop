@@ -128,10 +128,12 @@ export function createStreamingRunHandle(input: {
 
       const emitFinish = (
         status: "succeeded" | "failed" | "canceled",
+        reason?: string,
         usage?: Record<string, unknown>,
       ): ProviderStreamChunk => ({
         type: "run.finished",
         status,
+        ...(reason ? { reason } : {}),
         usage,
       });
 
@@ -210,15 +212,23 @@ export function createStreamingRunHandle(input: {
           if (part.type === "finish" && !finished) {
             finished = true;
             const status = mapFinishReason(part.finishReason, abortController.signal.aborted);
-            yield emitFinish(status, toUsageRecord(part.totalUsage));
+            const reason = status === "failed"
+              ? `finish_reason:${part.finishReason ?? "error"}`
+              : undefined;
+            yield emitFinish(status, reason, toUsageRecord(part.totalUsage));
           }
         }
 
         if (!finished) {
           const reason = await result.finishReason;
           const usage = await result.totalUsage;
+          const status = mapFinishReason(reason, abortController.signal.aborted);
+          const detail = status === "failed"
+            ? `finish_reason:${reason ?? "error"}`
+            : undefined;
           yield emitFinish(
-            mapFinishReason(reason, abortController.signal.aborted),
+            status,
+            detail,
             toUsageRecord(usage),
           );
         }
@@ -231,7 +241,10 @@ export function createStreamingRunHandle(input: {
           return;
         }
 
-        throw error;
+        yield emitFinish(
+          "failed",
+          error instanceof Error ? error.message : String(error),
+        );
       }
     },
     stop: async () => {

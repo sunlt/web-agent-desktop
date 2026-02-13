@@ -458,5 +458,5 @@
 14. Phase 21（进行中）
 
 ## 当前阶段
-- `in_progress`: Phase 23（Provider 协议命名收口：codex-app-server 兼容 + 默认切换）
-- `next_commit`: `refactor(phase-executor-runtime-6): add codex-app-server alias across gateway/control-plane/executor path`
+- `in_progress`: Phase 24（真实 Provider 失败可诊断性收敛：reason 透传 + 证据归档修复）
+- `next_commit`: `fix(phase-21): improve real-provider failure diagnostics and artifact capture`

@@ -50,6 +50,7 @@ export type ProviderStreamChunk =
   | {
       readonly type: "run.finished";
       readonly status: "succeeded" | "failed" | "canceled";
+      readonly reason?: string;
       readonly usage?: Record<string, unknown>;
     };
 

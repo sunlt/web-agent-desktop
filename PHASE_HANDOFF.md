@@ -1736,3 +1736,53 @@
 
 ### next_phase
 - 结合真实 provider 压测报告继续收敛 `provider_no_output` 失败簇（优先凭据/模型可用性与 executor 运行参数）。
+
+## Phase 24: 真实 Provider 失败可诊断性收敛（reason + 证据）
+
+### objective
+- 解决真实 provider 压测中 `unknown_failure` 难定位的问题：失败原因需要跨 `executor -> control-plane -> SSE` 明确透传，且失败样本必须保留完整原始 SSE。
+
+### inputs
+- Phase 21 压测报告显示近期存在 `unknown_failure` 聚类，`detail=failed` 信息不足。
+- 失败样本归档里 `sse.raw.txt` 为空（由 bash command substitution 子进程变量丢失导致）。
+
+### actions
+- 扩展 provider stream 终态协议：`run.finished` 增加可选 `reason` 字段（control-plane/executor 同步）。
+- `executor` 运行时增强：
+  - `runtime-utils` 在失败终态附带 `reason`（如 `finish_reason:error`）。
+  - `ProviderRunner` 增加 run 级结构化日志（accepted/finished/closed）。
+  - 异常或无终态关闭路径强制补发 `run.finished(failed)`，并附 `reason`。
+- `control-plane` `RunOrchestrator` 透传失败原因到 `run.status.detail`。
+- 修复压测脚本归档缺陷：
+  - 使用临时文件持久化本轮 SSE/curl stderr，避免 subshell 变量丢失。
+  - 分类器新增 `messagePreview`，结合终态 detail + message delta 文本进行故障归类。
+
+### outputs
+- `executor/src/providers/types.ts`
+- `executor/src/providers/runtime-utils.ts`
+- `executor/src/services/provider-runner.ts`
+- `control-plane/src/providers/types.ts`
+- `control-plane/src/services/run-orchestrator.ts`
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `EXECUTOR_PROVIDER_RUNTIME_REFACTOR_PLAN.md`
+
+### validation
+- commands:
+  - `bash -n scripts/e2e-portal-real-provider-stress.sh`
+  - `cd executor && npm run lint && npm run typecheck`
+  - `cd control-plane && npm run lint && npm run typecheck && npm test`
+  - `STRESS_ITERATIONS=1 STRESS_PRECHECK_TIMEOUT_SEC=30 STRESS_RUN_TIMEOUT_SEC=30 STRESS_STRICT=0 bash scripts/e2e-portal-real-provider-stress.sh`
+- results:
+  - 语法/lint/typecheck/test 全通过。
+  - 压测 preflight/stress 明确归类为 `auth_missing`（由此前 `unknown_failure` 收敛）。
+  - 失败样本 `sse.raw.txt` 已非空并含完整 `run.status/message.delta/run.closed` 事件。
+  - `executor` 日志可直接看到 `provider run finished` 与 `reason` 字段。
+
+### gate_result
+- **Pass**（真实 provider 失败可诊断性显著提升，后续可直接按分类修复）
+
+### risks
+- 当前 `finish_reason:error` 仍是抽象原因；若需定位更细粒度根因（网络、上游策略、额度），需继续结合 provider 原始错误文本/响应码做结构化抽取。
+
+### next_phase
+- Phase 25：真实 provider 凭据与模型可用性治理（容器内凭据注入策略、health gate 强化、CI strict 条件化启用）。

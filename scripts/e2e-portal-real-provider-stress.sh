@@ -92,12 +92,13 @@ runtime_checks_tmp="$(mktemp)"
 preflight_tmp="$(mktemp)"
 fallback_tmp="$(mktemp)"
 artifacts_tmp="$(mktemp)"
-LAST_SSE_PAYLOAD=""
-LAST_CURL_ERROR=""
+last_sse_payload_file="$(mktemp)"
+last_curl_error_file="$(mktemp)"
 archived_failure_count=0
 
 cleanup() {
-  rm -f "$results_tmp" "$runtime_checks_tmp" "$preflight_tmp" "$fallback_tmp" "$artifacts_tmp"
+  rm -f "$results_tmp" "$runtime_checks_tmp" "$preflight_tmp" "$fallback_tmp" "$artifacts_tmp" \
+    "$last_sse_payload_file" "$last_curl_error_file"
 }
 trap cleanup EXIT
 
@@ -142,9 +143,9 @@ capture_failure_artifact() {
   mkdir -p "$sample_dir"
 
   printf '%s\n' "$run_result" >"${sample_dir}/result.json"
-  printf '%s\n' "${LAST_SSE_PAYLOAD:-}" >"${sample_dir}/sse.raw.txt"
-  if [[ -n "${LAST_CURL_ERROR:-}" ]]; then
-    printf '%s\n' "$LAST_CURL_ERROR" >"${sample_dir}/curl.stderr.txt"
+  cp "$last_sse_payload_file" "${sample_dir}/sse.raw.txt"
+  if [[ -s "$last_curl_error_file" ]]; then
+    cp "$last_curl_error_file" "${sample_dir}/curl.stderr.txt"
   fi
   if [[ -s "$runtime_checks_tmp" ]]; then
     cp "$runtime_checks_tmp" "${sample_dir}/runtime-checks.ndjson"
@@ -304,7 +305,7 @@ parse_sse_result() {
         });
     }
 
-    function classifyFailure(outcome, detail, curlExitCode) {
+    function classifyFailure(outcome, detail, messagePreview, messageCount, curlExitCode) {
       if (outcome === "succeeded") {
         return {
           failureClass: "none",
@@ -312,7 +313,7 @@ parse_sse_result() {
         };
       }
 
-      const lowered = String(detail || "").toLowerCase();
+      const lowered = `${String(detail || "")} ${String(messagePreview || "")}`.toLowerCase();
       if (outcome === "transport_error") {
         return {
           failureClass: "transport_error",
@@ -395,6 +396,12 @@ parse_sse_result() {
           suggestion: "check SSE lifecycle, reconnect path, and upstream stream termination",
         };
       }
+      if (outcome === "failed" && messageCount === 0) {
+        return {
+          failureClass: "provider_no_output",
+          suggestion: "check provider stderr/auth and ensure terminal failure reason is propagated",
+        };
+      }
       return {
         failureClass: "unknown_failure",
         suggestion: "collect control-plane/executor logs and inspect run.status detail",
@@ -407,12 +414,19 @@ parse_sse_result() {
     let detail = "";
     let sawStarted = false;
     let sawClosed = false;
+    const messageDeltas = [];
 
     for (const item of events) {
       const data = item.data && typeof item.data === "object" ? item.data : {};
       const dataRunId = typeof data.runId === "string" ? data.runId : "";
       if (dataRunId) {
         runId = dataRunId;
+      }
+      if (item.event === "message.delta") {
+        const text = typeof data.text === "string" ? data.text : "";
+        if (text) {
+          messageDeltas.push(text);
+        }
       }
       if (item.event === "run.closed") {
         sawClosed = true;
@@ -462,9 +476,16 @@ parse_sse_result() {
     }
 
     const messageDeltaCount = events.filter((item) => item.event === "message.delta").length;
+    const messagePreview = messageDeltas.length > 0 ? messageDeltas[messageDeltas.length - 1].slice(0, 240) : "";
     const todoCount = events.filter((item) => item.event === "todo.update").length;
     const runStatusCount = events.filter((item) => item.event === "run.status").length;
-    const { failureClass, suggestion } = classifyFailure(outcome, detail, curlExit);
+    const { failureClass, suggestion } = classifyFailure(
+      outcome,
+      detail,
+      messagePreview,
+      messageDeltaCount,
+      curlExit,
+    );
 
     process.stdout.write(
       JSON.stringify({
@@ -474,6 +495,7 @@ parse_sse_result() {
         runId,
         outcome,
         detail,
+        messagePreview,
         failureClass,
         suggestion,
         curlExit,
@@ -518,8 +540,8 @@ JSON
   curl_err_text="$(cat "$err_file" || true)"
   rm -f "$err_file"
 
-  LAST_SSE_PAYLOAD="$sse_payload"
-  LAST_CURL_ERROR="$curl_err_text"
+  printf '%s' "$sse_payload" >"$last_sse_payload_file"
+  printf '%s' "$curl_err_text" >"$last_curl_error_file"
 
   if [[ -n "$curl_err_text" ]]; then
     parse_result=$(printf '%s' "$parse_result" | CURL_ERR="$curl_err_text" node -e '

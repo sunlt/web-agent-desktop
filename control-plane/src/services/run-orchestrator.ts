@@ -245,13 +245,17 @@ export class RunOrchestrator {
 
         context.status = chunk.status;
         context.endedAt = new Date();
+        const terminalDetail =
+          chunk.status === "failed" && chunk.reason
+            ? `${chunk.status}: ${chunk.reason}`
+            : chunk.status;
         yield {
           type: "run.status",
           runId,
           provider: context.provider,
           status: "finished",
           ts: context.endedAt.toISOString(),
-          detail: chunk.status,
+          detail: terminalDetail,
         };
       }
     } catch (error) {

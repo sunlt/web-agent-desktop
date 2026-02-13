@@ -123,6 +123,23 @@
 - portal 默认 provider 切换为 `codex-app-server`。
 - 保留 `codex-cli` 向后兼容。
 
+### Phase G：真实 Provider 失败可诊断性增强
+
+目标：收敛 Phase21 中 `unknown_failure/provider_no_output` 的排障盲区，确保失败时有明确 reason 与可用证据。
+
+范围：
+- `executor/src/providers/types.ts`
+- `executor/src/providers/runtime-utils.ts`
+- `executor/src/services/provider-runner.ts`
+- `control-plane/src/providers/types.ts`
+- `control-plane/src/services/run-orchestrator.ts`
+- `scripts/e2e-portal-real-provider-stress.sh`
+
+验收：
+- `run.status(detail)` 可携带失败原因（例如 `finish_reason:error`）。
+- 压测失败样本内 `sse.raw.txt` 非空并包含完整事件。
+- 压测报告可从 `unknown_failure` 收敛到可操作分类（如 `auth_missing`）。
+
 ## 4. 兼容与回滚策略
 
 1. 保留 `CONTROL_PLANE_PROVIDER_MODE=scripted` 作为测试与回滚保底。
@@ -142,4 +159,5 @@
 - Phase C：已完成（commit: `7413478` + `c0b36e2` + `41c3caf`）
 - Phase D：已完成（commit: `f38f9aa`）
 - Phase E：已完成（commit: `e4ece48`）
-- Phase F：进行中（本次提交）
+- Phase F：已完成（commit: `958ff43`）
+- Phase G：进行中（本次提交）
