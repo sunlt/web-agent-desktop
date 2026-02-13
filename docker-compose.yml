@@ -247,6 +247,22 @@ services:
       - agent-network
     restart: always
 
+  dozzle:
+    container_name: dozzle
+    image: amir20/dozzle:latest
+    ports:
+      - "3003:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - gateway
+      - control-plane
+      - executor-manager
+      - executor
+    networks:
+      - agent-network
+    restart: always
+
   pgsql:
     container_name: pgsql
     image: docker.m.daocloud.io/library/postgres:16-alpine

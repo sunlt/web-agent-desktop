@@ -1572,3 +1572,57 @@
 
 ### next_phase
 - Phase 21 后续子阶段：补 provider 凭据健康检查脚本与 CI 失败提示模板，区分“环境未就绪”与“能力回归”。
+
+---
+
+## Phase 21: 真实联调可观测性增强（日志工具）
+
+### objective
+- 解决多服务容器日志“难以统一查看”的问题，提供即开即用的日志 UI 与命令行聚合入口。
+
+### inputs
+- 当前已具备 Loki/Promtail/Grafana，但一线排障仍需频繁切换命令与容器。
+- 用户明确提出“多个服务容器日志不好管理查看”。
+
+### actions
+- `docker-compose.yml` 新增 `dozzle` 服务：
+  - 镜像：`amir20/dozzle:latest`
+  - 端口：`3003 -> 8080`
+  - 挂载只读 `docker.sock`，用于容器日志实时查看
+- 新增统一脚本 `scripts/logs-tool.sh`：
+  - `up`：一键启动 `loki/promtail/grafana/dozzle`
+  - `urls`：输出日志工具访问地址
+  - `tail`：多服务实时日志（默认核心服务）
+  - `since`：时间窗口回看
+  - `run`：按 `runId` 快速过滤日志（默认最近 30 分钟）
+- 新增文档 `observability/LOGGING_TOOL.md`，提供启动方式、URL、常用命令与排障场景。
+
+### outputs
+- `docker-compose.yml`
+- `scripts/logs-tool.sh`
+- `observability/LOGGING_TOOL.md`
+- `PHASE_HANDOFF.md`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `docker compose -f docker-compose.yml config`
+  - `bash scripts/logs-tool.sh help`
+  - `docker compose -f docker-compose.yml up -d dozzle`
+  - `docker compose -f docker-compose.yml ps dozzle`
+  - `bash scripts/pre-commit-check.sh`
+- results:
+  - compose 配置校验通过。
+  - `logs-tool.sh` 命令帮助与参数解析通过。
+  - dozzle 容器可正常拉起并监听 `0.0.0.0:3003`。
+  - 全仓 pre-commit 检查通过。
+
+### gate_result
+- **Pass**（多服务日志查看入口已统一，联调排障效率提升）
+
+### risks
+- Dozzle 依赖 `docker.sock`，适合本地联调环境；生产环境需额外权限与安全策略评估。
+- `run` 子命令基于文本过滤，若日志未打印 runId 字段仍需结合 Grafana/Loki 查询。
+
+### next_phase
+- Phase 21 后续子阶段：补 provider 凭据健康检查脚本与 CI 失败提示模板，区分“环境未就绪”与“能力回归”。

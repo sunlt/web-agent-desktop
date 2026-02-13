@@ -404,6 +404,9 @@
 **范围文件**:
 - `.gitignore`
 - `scripts/e2e-portal-real-provider-stress.sh`
+- `scripts/logs-tool.sh`
+- `observability/LOGGING_TOOL.md`
+- `docker-compose.yml`
 - `REMAINING_DEVELOPMENT_TASKS.md`
 - `PHASE_HANDOFF.md`
 
@@ -425,6 +428,9 @@
 - [x] 脚本支持 `STRESS_SUMMARY_OUT` 导出稳定 JSON 摘要，便于 CI 消费。
 - [x] CI 工作流新增可选 Phase21 压测开关（基于 `vars.CI_PHASE21_REAL_PROVIDER`），支持 strict 阈值配置与产物上传。
 - [x] CI Job Summary 新增压测核心指标展示（successRate / failureArtifactCount / 报告路径）。
+- [x] 新增 Dozzle 日志聚合 UI（`docker-compose` 服务 + `http://127.0.0.1:3003` 入口）。
+- [x] 新增统一日志工具脚本 `scripts/logs-tool.sh`（`up/urls/tail/since/run`）。
+- [x] 新增日志工具文档 `observability/LOGGING_TOOL.md`，覆盖多服务实时查看与 runId 定位。
 
 **Verification Criteria**:
 - [x] `bash scripts/e2e-portal-real-provider-stress.sh` 可执行并输出报告。
@@ -453,4 +459,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 21（真实 Provider 压测基线与 Flaky 收敛）
-- `next_commit`: `ci(phase-21): add optional real-provider stress gate and summary artifact`
+- `next_commit`: `feat(phase-21): add dozzle and unified logs tool for multi-service troubleshooting`
