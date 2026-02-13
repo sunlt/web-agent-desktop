@@ -1,31 +1,47 @@
+import type { CSSProperties, FormEvent, KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChatDesktopWindow } from "./workbench/chat-desktop-window";
+import { FilesDesktopWindow } from "./workbench/files-desktop-window";
+import type { StoreAppItem } from "./workbench/store-types";
+import { StoreDesktopWindow } from "./workbench/store-desktop-window";
+import { TodoDesktopWindow } from "./workbench/todo-desktop-window";
 import type { ProviderKind } from "./workbench/transport";
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { FileWorkspacePanel } from "./workbench/file-workspace-panel";
-import { SessionTerminalPanel } from "./workbench/session-terminal-panel";
+import { TtyDesktopWindow } from "./workbench/tty-desktop-window";
 import { useFileWorkspace } from "./workbench/use-file-workspace";
 import { useRunChat } from "./workbench/use-run-chat";
 import { useSessionTerminal } from "./workbench/use-session-terminal";
-import {
-  extractMessageText,
-  formatTime,
-  resolveHumanLoopTimeoutState,
-} from "./workbench/utils";
-
-type StoreAppItem = {
-  appId: string;
-  name: string;
-  enabled: boolean;
-  canView: boolean;
-  canUse: boolean;
-  runtimeDefaults: {
-    provider: ProviderKind;
-    model: string;
-    timeoutMs: number | null;
-    credentialEnvKeys: string[];
-  } | null;
-};
 
 type StoreStatus = "idle" | "loading" | "error";
+type DesktopAppId = "chat" | "store" | "todo" | "files" | "tty";
+
+type DesktopWindowState = {
+  open: boolean;
+  minimized: boolean;
+  zIndex: number;
+};
+
+type DesktopFrame = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+};
+
+type DesktopAppMeta = {
+  title: string;
+  badge: string;
+  description: string;
+  defaultOpen: boolean;
+  frame: DesktopFrame;
+};
+
+const DESKTOP_APP_BASE_Z: Record<DesktopAppId, number> = {
+  chat: 40,
+  store: 30,
+  todo: 20,
+  files: 10,
+  tty: 11,
+};
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(
   /\/$/,
@@ -39,6 +55,75 @@ const DEFAULT_MODEL: Record<ProviderKind, string> = {
   "claude-code": "claude-sonnet-4-20250514",
 };
 
+const DESKTOP_APP_ORDER: readonly DesktopAppId[] = [
+  "chat",
+  "store",
+  "todo",
+  "files",
+  "tty",
+];
+
+const DESKTOP_APP_META: Record<DesktopAppId, DesktopAppMeta> = {
+  chat: {
+    title: "ChatUI",
+    badge: "CH",
+    description: "聊天与执行主界面",
+    defaultOpen: true,
+    frame: { top: 24, left: 140, width: 930, height: 760 },
+  },
+  store: {
+    title: "应用商店",
+    badge: "ST",
+    description: "选择可见/可用应用",
+    defaultOpen: true,
+    frame: { top: 24, left: 1088, width: 360, height: 430 },
+  },
+  todo: {
+    title: "TodoList",
+    badge: "TD",
+    description: "任务状态与时间线",
+    defaultOpen: true,
+    frame: { top: 472, left: 1088, width: 360, height: 312 },
+  },
+  files: {
+    title: "Files",
+    badge: "FI",
+    description: "会话/全局文件管理",
+    defaultOpen: true,
+    frame: { top: 56, left: 170, width: 1180, height: 700 },
+  },
+  tty: {
+    title: "TTY",
+    badge: "TT",
+    description: "会话命令执行",
+    defaultOpen: true,
+    frame: { top: 80, left: 260, width: 920, height: 620 },
+  },
+};
+
+function createInitialDesktopWindows(): Record<DesktopAppId, DesktopWindowState> {
+  return DESKTOP_APP_ORDER.reduce(
+    (acc, appId) => {
+      const meta = DESKTOP_APP_META[appId];
+      acc[appId] = {
+        open: meta.defaultOpen,
+        minimized: false,
+        zIndex: DESKTOP_APP_BASE_Z[appId],
+      };
+      return acc;
+    },
+    {} as Record<DesktopAppId, DesktopWindowState>,
+  );
+}
+
+function formatDesktopClock(now: number): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(now);
+}
+
 export default function App() {
   const [provider, setProvider] = useState<ProviderKind>("codex-app-server");
   const [model, setModel] = useState<string>(DEFAULT_MODEL["codex-app-server"]);
@@ -50,6 +135,19 @@ export default function App() {
   const [storeStatus, setStoreStatus] = useState<StoreStatus>("idle");
   const [storeError, setStoreError] = useState<string>("");
   const [activeAppId, setActiveAppId] = useState<string>("");
+
+  const [desktopWindows, setDesktopWindows] = useState<Record<
+    DesktopAppId,
+    DesktopWindowState
+  >>(createInitialDesktopWindows);
+  const [focusedDesktopApp, setFocusedDesktopApp] = useState<DesktopAppId | null>(
+    "chat",
+  );
+  const [clockLabel, setClockLabel] = useState<string>(() =>
+    formatDesktopClock(Date.now()),
+  );
+
+  const desktopZRef = useRef<number>(50);
 
   const activeStoreApp = useMemo(
     () => storeApps.find((item) => item.appId === activeAppId) ?? null,
@@ -117,6 +215,106 @@ export default function App() {
     appendTimeline: runChat.appendTimeline,
   });
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setClockLabel(formatDesktopClock(Date.now()));
+    }, 30_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const nextDesktopZ = useCallback((): number => {
+    desktopZRef.current += 1;
+    return desktopZRef.current;
+  }, []);
+
+  const focusDesktopWindow = useCallback(
+    (appId: DesktopAppId) => {
+      setDesktopWindows((prev) => {
+        const current = prev[appId];
+        if (!current.open) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [appId]: {
+            ...current,
+            minimized: false,
+            zIndex: nextDesktopZ(),
+          },
+        };
+      });
+      setFocusedDesktopApp(appId);
+    },
+    [nextDesktopZ],
+  );
+
+  const launchDesktopWindow = useCallback(
+    (appId: DesktopAppId) => {
+      setDesktopWindows((prev) => ({
+        ...prev,
+        [appId]: {
+          ...prev[appId],
+          open: true,
+          minimized: false,
+          zIndex: nextDesktopZ(),
+        },
+      }));
+      setFocusedDesktopApp(appId);
+    },
+    [nextDesktopZ],
+  );
+
+  const minimizeDesktopWindow = useCallback((appId: DesktopAppId) => {
+    setDesktopWindows((prev) => ({
+      ...prev,
+      [appId]: {
+        ...prev[appId],
+        minimized: true,
+      },
+    }));
+    setFocusedDesktopApp((prev) => (prev === appId ? null : prev));
+  }, []);
+
+  const closeDesktopWindow = useCallback((appId: DesktopAppId) => {
+    setDesktopWindows((prev) => ({
+      ...prev,
+      [appId]: {
+        ...prev[appId],
+        open: false,
+        minimized: false,
+      },
+    }));
+    setFocusedDesktopApp((prev) => (prev === appId ? null : prev));
+  }, []);
+
+  const toggleTaskbarWindow = useCallback(
+    (appId: DesktopAppId) => {
+      const current = desktopWindows[appId];
+      if (!current.open) {
+        launchDesktopWindow(appId);
+        return;
+      }
+      if (current.minimized) {
+        focusDesktopWindow(appId);
+        return;
+      }
+      if (focusedDesktopApp === appId) {
+        minimizeDesktopWindow(appId);
+        return;
+      }
+      focusDesktopWindow(appId);
+    },
+    [
+      desktopWindows,
+      focusDesktopWindow,
+      focusedDesktopApp,
+      launchDesktopWindow,
+      minimizeDesktopWindow,
+    ],
+  );
+
   const refreshStoreApps = useCallback(async () => {
     const userId = globalFileUserId.trim();
     if (!userId) {
@@ -150,7 +348,7 @@ export default function App() {
       setStoreStatus("error");
       setStoreError(message);
     }
-  }, [globalFileUserId, runChat]);
+  }, [globalFileUserId, runChat.fetchJson]);
 
   useEffect(() => {
     void refreshStoreApps();
@@ -174,398 +372,196 @@ export default function App() {
     [runChat],
   );
 
+  const visibleDesktopApps = useMemo(
+    () =>
+      DESKTOP_APP_ORDER.filter(
+        (appId) => desktopWindows[appId].open && !desktopWindows[appId].minimized,
+      ).sort((a, b) => desktopWindows[a].zIndex - desktopWindows[b].zIndex),
+    [desktopWindows],
+  );
+
+  const renderWindowBody = (appId: DesktopAppId) => {
+    switch (appId) {
+      case "chat":
+        return (
+          <ChatDesktopWindow
+            provider={provider}
+            model={model}
+            requireHumanLoop={requireHumanLoop}
+            setProvider={setProvider}
+            setModel={setModel}
+            setRequireHumanLoop={setRequireHumanLoop}
+            activeStoreApp={activeStoreApp}
+            runChat={runChat}
+            onInputKeyDown={onInputKeyDown}
+            onSubmit={onSubmit}
+          />
+        );
+      case "store":
+        return (
+          <StoreDesktopWindow
+            globalFileUserId={globalFileUserId}
+            setGlobalFileUserId={setGlobalFileUserId}
+            storeStatus={storeStatus}
+            storeError={storeError}
+            storeApps={storeApps}
+            activeAppId={activeAppId}
+            setActiveAppId={setActiveAppId}
+            activeStoreApp={activeStoreApp}
+            refreshStoreApps={refreshStoreApps}
+          />
+        );
+      case "todo":
+        return <TodoDesktopWindow runChat={runChat} />;
+      case "files":
+        return (
+          <FilesDesktopWindow
+            executorWorkspace={executorWorkspace}
+            globalFileWorkspace={globalFileWorkspace}
+            workspaceSessionId={workspaceSessionId}
+            setWorkspaceSessionId={setWorkspaceSessionId}
+            activeChatId={runChat.activeChatId}
+            globalFileUserId={globalFileUserId}
+            setGlobalFileUserId={setGlobalFileUserId}
+          />
+        );
+      case "tty":
+        return (
+          <TtyDesktopWindow
+            workspaceSessionId={workspaceSessionId}
+            setWorkspaceSessionId={setWorkspaceSessionId}
+            activeChatId={runChat.activeChatId}
+            terminal={sessionTerminal}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
-    <div className="app-root">
-      <header className="app-header">
-        <div>
-          <p className="eyebrow">Agent Workbench</p>
-          <h1>ChatUI · Todo · Human Loop · TTY · Files · Store</h1>
+    <div className="desktop-root">
+      <section className="desktop-surface">
+        <nav className="desktop-icons" aria-label="桌面图标">
+          {DESKTOP_APP_ORDER.map((appId) => {
+            const meta = DESKTOP_APP_META[appId];
+            const state = desktopWindows[appId];
+            const isActive = state.open && !state.minimized;
+            return (
+              <button
+                key={appId}
+                type="button"
+                className={`desktop-icon ${isActive ? "active" : ""}`}
+                onClick={() => launchDesktopWindow(appId)}
+                title={meta.description}
+              >
+                <span className="desktop-icon-badge">{meta.badge}</span>
+                <span className="desktop-icon-title">{meta.title}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="desktop-window-layer">
+          {visibleDesktopApps.map((appId) => {
+            const meta = DESKTOP_APP_META[appId];
+            const windowState = desktopWindows[appId];
+            const style: CSSProperties = {
+              top: meta.frame.top,
+              left: meta.frame.left,
+              width: meta.frame.width,
+              height: meta.frame.height,
+              zIndex: windowState.zIndex,
+            };
+
+            return (
+              <section
+                key={appId}
+                className={`desktop-window ${
+                  focusedDesktopApp === appId ? "focused" : ""
+                }`}
+                style={style}
+              >
+                <header
+                  className="desktop-window-header"
+                  onMouseDown={() => focusDesktopWindow(appId)}
+                >
+                  <div className="desktop-window-title">
+                    <span className="desktop-badge">{meta.badge}</span>
+                    <h2>{meta.title}</h2>
+                  </div>
+                  <div className="desktop-window-actions">
+                    <button
+                      type="button"
+                      className="secondary window-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        minimizeDesktopWindow(appId);
+                      }}
+                      aria-label={`最小化 ${meta.title}`}
+                    >
+                      _
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary window-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        closeDesktopWindow(appId);
+                      }}
+                      aria-label={`关闭 ${meta.title}`}
+                    >
+                      x
+                    </button>
+                  </div>
+                </header>
+                <div className="desktop-window-content">{renderWindowBody(appId)}</div>
+              </section>
+            );
+          })}
         </div>
-        <div className="run-chip" data-status={runChat.runStatus}>
-          <span className="run-dot" />
-          <span>{runChat.runStatus}</span>
-        </div>
-      </header>
-
-      <section className="control-bar">
-        <label>
-          Provider
-          <select
-            value={provider}
-            onChange={(event) => setProvider(event.target.value as ProviderKind)}
-            disabled={runChat.runStatus === "running" || Boolean(activeStoreApp?.runtimeDefaults)}
-          >
-            <option value="codex-app-server">codex-app-server</option>
-            <option value="codex-cli">codex-cli</option>
-            <option value="opencode">opencode</option>
-            <option value="claude-code">claude-code</option>
-          </select>
-        </label>
-
-        <label>
-          Model
-          <input
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            disabled={runChat.runStatus === "running" || Boolean(activeStoreApp?.runtimeDefaults)}
-            placeholder="输入模型 ID"
-          />
-        </label>
-
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={requireHumanLoop}
-            onChange={(event) => setRequireHumanLoop(event.target.checked)}
-            disabled={runChat.runStatus === "running"}
-          />
-          <span>require human-loop</span>
-        </label>
       </section>
 
-      <main className="layout">
-        <aside className="history-pane panel">
-          <div className="history-header">
-            <h3>历史会话</h3>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void runChat.handleCreateChat()}
-              disabled={runChat.submitting || runChat.runStatus === "running"}
-            >
-              新建
-            </button>
-          </div>
-          {runChat.historyStatus === "loading" ? (
-            <p className="muted">会话加载中...</p>
-          ) : null}
-          {runChat.historyError ? <p className="error-text">{runChat.historyError}</p> : null}
-          <div className="history-list">
-            {runChat.chatHistory.length === 0 ? (
-              <p className="muted">暂无历史会话</p>
-            ) : (
-              runChat.chatHistory.map((chat) => (
-                <button
-                  key={chat.chatId}
-                  type="button"
-                  className={`history-item ${chat.chatId === runChat.activeChatId ? "active" : ""}`}
-                  onClick={() => void runChat.handleSelectChat(chat.chatId)}
-                  disabled={runChat.submitting || runChat.runStatus === "running"}
-                >
-                  <strong>{chat.title}</strong>
-                  <span>{formatTime(chat.lastMessageAt ?? chat.updatedAt)}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </aside>
-
-        <section className="chat-pane">
-          <div className="messages" role="log" aria-live="polite">
-            {runChat.messages.length === 0 ? (
-              <div className="empty-state">
-                <h2>输入你的任务指令</h2>
-                <p>
-                  消息会通过 <code>POST /api/runs/start</code> 进入真实执行链路，右侧同步展示
-                  Todo 与 Human-loop。
-                </p>
-              </div>
-            ) : (
-              runChat.messages.map((message) => (
-                <article key={message.id} className={`bubble bubble-${message.role}`}>
-                  <header>
-                    <strong>{message.role}</strong>
-                    <time>
-                      {message.metadata?.createdAt
-                        ? formatTime(message.metadata.createdAt)
-                        : "-"}
-                    </time>
-                  </header>
-                  <pre>
-                    {extractMessageText(message) ||
-                      (message.role === "assistant" && runChat.runStatus === "running"
-                        ? "..."
-                        : "")}
-                  </pre>
-                </article>
-              ))
-            )}
-          </div>
-
-          <form className="composer" onSubmit={onSubmit}>
-            <textarea
-              value={runChat.input}
-              onChange={(event) => runChat.setInput(event.target.value)}
-              onKeyDown={onInputKeyDown}
-              placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-              rows={3}
-              disabled={runChat.submitting}
-            />
-            <div className="composer-actions">
+      <footer className="desktop-taskbar">
+        <button
+          type="button"
+          className="taskbar-start"
+          onClick={() => launchDesktopWindow("chat")}
+        >
+          WEB
+        </button>
+        <div className="taskbar-apps" role="tablist" aria-label="任务栏应用">
+          {DESKTOP_APP_ORDER.map((appId) => {
+            const meta = DESKTOP_APP_META[appId];
+            const state = desktopWindows[appId];
+            const selected =
+              state.open && !state.minimized && focusedDesktopApp === appId;
+            const active = state.open && !state.minimized;
+            return (
               <button
-                type="submit"
-                disabled={
-                  runChat.submitting ||
-                  runChat.runStatus === "running" ||
-                  !runChat.input.trim()
-                }
-              >
-                发送
-              </button>
-              <button
+                key={appId}
                 type="button"
-                className="secondary"
-                disabled={runChat.runStatus !== "running"}
-                onClick={() => void runChat.handleStop()}
+                role="tab"
+                aria-selected={selected}
+                className={`taskbar-app ${active ? "active" : ""} ${
+                  selected ? "focused" : ""
+                }`}
+                onClick={() => toggleTaskbarWindow(appId)}
+                title={meta.description}
               >
-                停止
+                <span>{meta.badge}</span>
+                <span>{meta.title}</span>
               </button>
-            </div>
-          </form>
-
-          {runChat.errorText ? <p className="error-text">{runChat.errorText}</p> : null}
-        </section>
-
-        <aside className="side-pane">
-          <section className="panel">
-            <h3>Run 状态</h3>
-            <dl>
-              <dt>chatId</dt>
-              <dd>{runChat.activeChatId ?? "-"}</dd>
-              <dt>runId</dt>
-              <dd>{runChat.activeRunId ?? "-"}</dd>
-              <dt>app</dt>
-              <dd>{activeStoreApp ? `${activeStoreApp.name} (${activeStoreApp.appId})` : "-"}</dd>
-              <dt>status</dt>
-              <dd>{runChat.runStatus}</dd>
-              <dt>stream</dt>
-              <dd>
-                {runChat.streamConnection.state}
-                {runChat.streamConnection.state === "reconnecting"
-                  ? ` (#${runChat.streamConnection.attempt})`
-                  : ""}
-              </dd>
-              <dt>detail</dt>
-              <dd>{runChat.runDetail || "-"}</dd>
-            </dl>
-          </section>
-
-          <section className="panel">
-            <h3>应用商店</h3>
-            <div className="store-controls">
-              <button
-                type="button"
-                className="secondary"
-                disabled={storeStatus === "loading" || !globalFileUserId.trim()}
-                onClick={() => void refreshStoreApps()}
-              >
-                {storeStatus === "loading" ? "刷新中..." : "刷新应用"}
-              </button>
-            </div>
-            {storeError ? <p className="error-text">{storeError}</p> : null}
-            <div className="store-list">
-              {storeApps.length === 0 ? (
-                <p className="muted">当前用户无可见应用</p>
-              ) : (
-                storeApps.map((app) => (
-                  <button
-                    key={app.appId}
-                    type="button"
-                    className={`store-item ${activeAppId === app.appId ? "active" : ""}`}
-                    disabled={!app.canUse}
-                    onClick={() => setActiveAppId(app.appId)}
-                    title={app.canUse ? app.appId : "无使用权限"}
-                  >
-                    <strong>{app.name}</strong>
-                    <span>{app.appId}</span>
-                    <span>{app.canUse ? "可用" : "仅可见"}</span>
-                  </button>
-                ))
-              )}
-            </div>
-            {activeStoreApp ? (
-              <>
-                <p className="muted">
-                  新会话默认绑定应用：<code>{activeStoreApp.appId}</code>
-                </p>
-                {activeStoreApp.runtimeDefaults ? (
-                  <p className="muted">
-                    已锁定 provider/model：
-                    <code>
-                      {activeStoreApp.runtimeDefaults.provider} /{" "}
-                      {activeStoreApp.runtimeDefaults.model}
-                    </code>
-                  </p>
-                ) : null}
-              </>
-            ) : null}
-          </section>
-
-          <section className="panel">
-            <h3>Todo</h3>
-            <div className="todo-grid">
-              {(Object.keys(runChat.groupedTodos) as Array<keyof typeof runChat.groupedTodos>).map(
-                (status) => (
-                  <div key={status} className="todo-column">
-                    <h4>
-                      {status} <span>{runChat.groupedTodos[status].length}</span>
-                    </h4>
-                    {runChat.groupedTodos[status].length === 0 ? (
-                      <p className="muted">空</p>
-                    ) : (
-                      runChat.groupedTodos[status].map((item) => (
-                        <div key={`${item.runId}-${item.todoId}`} className="todo-card">
-                          <div className="todo-order">#{item.order}</div>
-                          <div className="todo-content">{item.content}</div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                ),
-              )}
-            </div>
-            <div className="todo-events">
-              <h4>Todo Timeline</h4>
-              {runChat.todoEvents.length === 0 ? (
-                <p className="muted">暂无事件</p>
-              ) : (
-                <ul>
-                  {runChat.todoEvents.slice(-20).map((event) => (
-                    <li key={event.eventId}>
-                      <time>{formatTime(event.eventTs)}</time>
-                      <span>
-                        [{event.status}] #{event.order} {event.content}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </section>
-
-          <section className="panel">
-            <h3>Human-loop</h3>
-            {runChat.pendingRequests.length === 0 ? (
-              <p className="muted">当前无待回复问题</p>
-            ) : (
-              <div className="pending-list">
-                {runChat.pendingRequests.map((request) => {
-                  const timeoutState = resolveHumanLoopTimeoutState(
-                    {
-                      requestedAt: request.requestedAt,
-                      metadata: request.metadata,
-                    },
-                    runChat.nowTick,
-                  );
-                  return (
-                    <article
-                      key={request.questionId}
-                      className={`pending-card ${timeoutState.timedOut ? "timeout" : ""}`}
-                    >
-                      <header>
-                        <strong>{request.questionId}</strong>
-                        <time>{formatTime(request.requestedAt)}</time>
-                      </header>
-                      <p>{request.prompt}</p>
-                      <p
-                        className={`human-loop-timeout ${timeoutState.timedOut ? "warning" : ""}`}
-                      >
-                        {timeoutState.text}
-                      </p>
-                      <textarea
-                        placeholder="输入回复"
-                        value={runChat.answerDrafts[request.questionId] ?? ""}
-                        onChange={(event) =>
-                          runChat.setAnswerDrafts((prev) => ({
-                            ...prev,
-                            [request.questionId]: event.target.value,
-                          }))
-                        }
-                        rows={2}
-                      />
-                      {runChat.replyFeedback[request.questionId] ? (
-                        <p className="human-loop-feedback">
-                          {runChat.replyFeedback[request.questionId]}
-                        </p>
-                      ) : null}
-                      <button
-                        type="button"
-                        disabled={
-                          runChat.replying[request.questionId] === true ||
-                          !(runChat.answerDrafts[request.questionId] ?? "").trim()
-                        }
-                        onClick={() => void runChat.handleReply(request)}
-                      >
-                        {runChat.replying[request.questionId] ? "提交中..." : "提交回复"}
-                      </button>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-            <div className="resolved-list-wrap">
-              <h4>Resolved 历史</h4>
-              {runChat.resolvedRequests.length === 0 ? (
-                <p className="muted">暂无已处理问题</p>
-              ) : (
-                <ul className="resolved-list">
-                  {runChat.resolvedRequests.slice(0, 20).map((request) => (
-                    <li key={`${request.runId}-${request.questionId}`}>
-                      <div className="resolved-head">
-                        <strong>{request.questionId}</strong>
-                        <time>{formatTime(request.resolvedAt ?? request.requestedAt)}</time>
-                      </div>
-                      <p>{request.prompt}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </section>
-
-          <FileWorkspacePanel
-            title="执行器工作目录文件"
-            workspace={executorWorkspace}
-            identity={{
-              label: "sessionId",
-              value: workspaceSessionId,
-              onChange: setWorkspaceSessionId,
-              placeholder: runChat.activeChatId ?? "chat/session id",
-            }}
-            hint="基于 executor-manager 会话 worker，根目录为 /workspace。"
-          />
-
-          <SessionTerminalPanel terminal={sessionTerminal} />
-
-          <FileWorkspacePanel
-            title="全局文件管理"
-            workspace={globalFileWorkspace}
-            identity={{
-              label: "userId",
-              value: globalFileUserId,
-              onChange: setGlobalFileUserId,
-              placeholder: "u-alice",
-            }}
-            hint="用于访问 RBAC 控制的全局文件树（/files）。"
-          />
-
-          <section className="panel">
-            <h3>Run Timeline</h3>
-            {runChat.timeline.length === 0 ? (
-              <p className="muted">暂无事件</p>
-            ) : (
-              <ul className="timeline-list">
-                {runChat.timeline.slice(-30).map((entry) => (
-                  <li key={entry.id}>
-                    <time>{formatTime(entry.ts)}</time>
-                    <span>{entry.label}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </aside>
-      </main>
+            );
+          })}
+        </div>
+        <div className="taskbar-right">
+          <span className="taskbar-run-status" data-status={runChat.runStatus}>
+            {runChat.runStatus}
+          </span>
+          <time>{clockLabel}</time>
+        </div>
+      </footer>
     </div>
   );
 }
