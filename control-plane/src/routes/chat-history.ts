@@ -4,12 +4,14 @@ import type { ChatHistoryRepository } from "../repositories/chat-history-reposit
 
 const listHistorySchema = z.object({
   limit: z.coerce.number().int().positive().max(200).optional(),
+  userId: z.string().min(1).optional(),
 });
 
 const createSessionSchema = z
   .object({
     chatId: z.string().min(1).optional(),
     sessionId: z.string().min(1).optional(),
+    userId: z.string().min(1).optional(),
     title: z.string().min(1).optional(),
     provider: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
@@ -45,6 +47,7 @@ export function createChatHistoryRouter(
 
     const chats = await historyRepo.listSessions({
       limit: parsed.data.limit,
+      userId: parsed.data.userId ?? resolveUserId(req),
     });
 
     return res.json({
@@ -59,18 +62,23 @@ export function createChatHistoryRouter(
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
-    const chat = await historyRepo.createSession(parsed.data);
+    const chat = await historyRepo.createSession({
+      ...parsed.data,
+      userId: parsed.data.userId ?? resolveUserId(req),
+    });
     return res.status(201).json({ chat });
   });
 
   router.get("/chat-opencode-history/:chatId", async (req, res) => {
-    const chat = await historyRepo.findSession(req.params.chatId);
+    const userId = resolveUserId(req);
+    const chat = await historyRepo.findSession(req.params.chatId, userId);
     if (!chat) {
       return res.status(404).json({ error: "chat session not found" });
     }
 
     const messages = await historyRepo.listMessages({
       chatId: req.params.chatId,
+      userId,
     });
 
     return res.json({
@@ -86,13 +94,15 @@ export function createChatHistoryRouter(
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
-    const existing = await historyRepo.findSession(req.params.chatId);
+    const userId = resolveUserId(req);
+    const existing = await historyRepo.findSession(req.params.chatId, userId);
     if (!existing) {
       return res.status(404).json({ error: "chat session not found" });
     }
 
     await historyRepo.replaceMessages({
       chatId: req.params.chatId,
+      userId,
       title: parsed.data.title,
       provider: parsed.data.provider,
       model: parsed.data.model,
@@ -100,9 +110,10 @@ export function createChatHistoryRouter(
       messages: parsed.data.messages,
     });
 
-    const chat = await historyRepo.findSession(req.params.chatId);
+    const chat = await historyRepo.findSession(req.params.chatId, userId);
     const messages = await historyRepo.listMessages({
       chatId: req.params.chatId,
+      userId,
     });
 
     return res.json({
@@ -114,4 +125,19 @@ export function createChatHistoryRouter(
   });
 
   return router;
+}
+
+function resolveUserId(req: {
+  query?: Record<string, unknown>;
+  headers?: Record<string, unknown>;
+}): string {
+  const fromQuery =
+    typeof req.query?.userId === "string" ? req.query.userId : undefined;
+  const fromHeader =
+    typeof req.headers?.["x-user-id"] === "string"
+      ? req.headers["x-user-id"]
+      : undefined;
+  const value = fromQuery ?? fromHeader;
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "u-anon";
 }

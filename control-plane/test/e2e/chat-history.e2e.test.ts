@@ -5,6 +5,7 @@ import { withHttpServer } from "./http-test-utils.js";
 type ChatSummary = {
   chatId: string;
   sessionId: string;
+  userId: string;
   title: string;
   provider: string | null;
   model: string | null;
@@ -32,6 +33,7 @@ describe("Chat History API E2E", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
+          userId: "u-alice",
           title: "历史会话一",
           provider: "codex-cli",
           model: "gpt-5.1-codex",
@@ -44,10 +46,11 @@ describe("Chat History API E2E", () => {
       };
       expect(created.chat.chatId.length).toBeGreaterThan(0);
       expect(created.chat.sessionId).toBe(created.chat.chatId);
+      expect(created.chat.userId).toBe("u-alice");
       expect(created.chat.title).toBe("历史会话一");
 
       const putRes = await fetch(
-        `${baseUrl}/api/chat-opencode-history/${encodeURIComponent(created.chat.chatId)}`,
+        `${baseUrl}/api/chat-opencode-history/${encodeURIComponent(created.chat.chatId)}?userId=u-alice`,
         {
           method: "PUT",
           headers: {
@@ -87,7 +90,7 @@ describe("Chat History API E2E", () => {
         "你好，我在。",
       ]);
 
-      const listRes = await fetch(`${baseUrl}/api/chat-opencode-history`);
+      const listRes = await fetch(`${baseUrl}/api/chat-opencode-history?userId=u-alice`);
       expect(listRes.status).toBe(200);
       const listBody = (await listRes.json()) as {
         total: number;
@@ -98,7 +101,7 @@ describe("Chat History API E2E", () => {
       expect(listBody.chats[0]?.lastMessageAt).toBe("2026-02-12T15:00:01.000Z");
 
       const detailRes = await fetch(
-        `${baseUrl}/api/chat-opencode-history/${encodeURIComponent(created.chat.chatId)}`,
+        `${baseUrl}/api/chat-opencode-history/${encodeURIComponent(created.chat.chatId)}?userId=u-alice`,
       );
       expect(detailRes.status).toBe(200);
       const detailBody = (await detailRes.json()) as {
@@ -110,6 +113,42 @@ describe("Chat History API E2E", () => {
       expect(detailBody.total).toBe(2);
       expect(detailBody.messages[0]?.role).toBe("user");
       expect(detailBody.messages[1]?.role).toBe("assistant");
+    });
+  });
+
+  test("should isolate chat history by userId", async () => {
+    const app = createControlPlaneApp();
+
+    await withHttpServer(app, async (baseUrl) => {
+      const createRes = await fetch(`${baseUrl}/api/chat-opencode-history`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: "u-alice",
+          title: "alice-chat",
+          provider: "codex-cli",
+          model: "gpt-5.1-codex",
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()) as { chat: ChatSummary };
+
+      const listBob = await fetch(`${baseUrl}/api/chat-opencode-history?userId=u-bob`);
+      expect(listBob.status).toBe(200);
+      const listBobBody = (await listBob.json()) as {
+        total: number;
+        chats: ChatSummary[];
+      };
+      expect(listBobBody.chats.some((item) => item.chatId === created.chat.chatId)).toBe(
+        false,
+      );
+
+      const detailBob = await fetch(
+        `${baseUrl}/api/chat-opencode-history/${encodeURIComponent(created.chat.chatId)}?userId=u-bob`,
+      );
+      expect(detailBob.status).toBe(404);
     });
   });
 });

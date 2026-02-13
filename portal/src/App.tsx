@@ -59,6 +59,7 @@ export default function App() {
     model,
     requireHumanLoop,
     activeStoreApp,
+    historyUserId: globalFileUserId,
   });
 
   useEffect(() => {
