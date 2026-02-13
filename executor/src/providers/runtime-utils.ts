@@ -312,17 +312,84 @@ function toUsageRecord(usage: unknown): Record<string, unknown> | undefined {
 function normalizeErrorReason(error: unknown): string {
   if (error instanceof Error) {
     const message = error.message.trim();
-    return message.length > 0 ? message : error.name;
+    const base = message.length > 0 ? message : error.name;
+    const causeDetail = extractCauseDetail(error);
+    if (
+      causeDetail &&
+      !base.toLowerCase().includes(causeDetail.toLowerCase())
+    ) {
+      return `${base} (${causeDetail})`;
+    }
+    return base;
   }
   if (typeof error === "string") {
     const message = error.trim();
     return message.length > 0 ? message : "unknown_error";
   }
   if (error && typeof error === "object") {
-    const candidate = (error as { message?: unknown }).message;
+    const record = error as {
+      message?: unknown;
+      cause?: unknown;
+      code?: unknown;
+    };
+    const candidate = record.message;
     if (typeof candidate === "string" && candidate.trim().length > 0) {
-      return candidate.trim();
+      const normalized = candidate.trim();
+      const causeDetail = extractCauseDetail(record.cause);
+      const code = typeof record.code === "string" ? record.code.trim() : "";
+      if (
+        causeDetail &&
+        !normalized.toLowerCase().includes(causeDetail.toLowerCase())
+      ) {
+        return `${normalized} (${causeDetail})`;
+      }
+      if (code.length > 0 && !normalized.toLowerCase().includes(code.toLowerCase())) {
+        return `${normalized} (${code})`;
+      }
+      return normalized;
     }
   }
   return "unknown_error";
+}
+
+function extractCauseDetail(error: unknown, depth = 0): string | undefined {
+  if (depth > 2 || !error) {
+    return undefined;
+  }
+
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message.length > 0) {
+      return message;
+    }
+    return error.name.trim().length > 0 ? error.name.trim() : undefined;
+  }
+
+  if (typeof error === "string") {
+    const normalized = error.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  if (typeof error === "object") {
+    const record = error as {
+      message?: unknown;
+      code?: unknown;
+      cause?: unknown;
+      name?: unknown;
+    };
+
+    const message =
+      typeof record.message === "string" ? record.message.trim() : "";
+    const code = typeof record.code === "string" ? record.code.trim() : "";
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+
+    const parts = [message, code, name].filter((item) => item.length > 0);
+    if (parts.length > 0) {
+      return parts.join(":");
+    }
+
+    return extractCauseDetail(record.cause, depth + 1);
+  }
+
+  return undefined;
 }

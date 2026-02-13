@@ -446,6 +446,16 @@ parse_sse_result() {
         };
       }
       if (
+        lowered.includes("fetch failed") ||
+        lowered.includes("headers timeout") ||
+        lowered.includes("und_err_headers_timeout")
+      ) {
+        return {
+          failureClass: "network_error",
+          suggestion: "increase provider/model timeout and inspect upstream gateway latency",
+        };
+      }
+      if (
         lowered.includes("econn") ||
         lowered.includes("network") ||
         lowered.includes("connection refused")
