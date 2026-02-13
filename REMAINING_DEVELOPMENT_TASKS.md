@@ -288,7 +288,7 @@
 
 **Verification Criteria**:
 - [x] 前端 E2E 覆盖核心路径并通过 CI（`.github/workflows/ci.yml` 已接入 `portal` Playwright）。
-- [ ] 真实环境联调（compose + external executor）下可稳定完成完整对话闭环。
+- [x] 真实环境联调（compose + external executor）下可稳定完成完整对话闭环（已新增 `scripts/e2e-full-conversation-real-env.sh`）。
 
 **Exit Criteria**:
 - 前端工作台达到 `设计.md` 的 M2+ 交互完整度基线。
@@ -333,6 +333,38 @@
 
 ---
 
+## Phase 19: 真实环境完整对话闭环 E2E 稳定化（进行中）
+**Type**: Integration + Reliability
+**Estimated**: 4~8 小时
+**目标**: 在 `gateway + executor-manager + control-plane + executor + postgres + rustfs` 真环境下，提供可重复执行的“完整对话闭环”验证脚本并固化门禁。
+
+**范围文件**:
+- `control-plane/src/app.ts`
+- `control-plane/src/providers/scripted-provider.ts`
+- `docker-compose.yml`
+- `scripts/e2e-full-conversation-real-env.sh`
+- `PHASE_HANDOFF.md`
+
+**Tasks**:
+- [x] 为 control-plane 增加 `CONTROL_PLANE_PROVIDER_MODE=scripted` 可切换 provider 模式，避免 real-env E2E 依赖外部模型服务。
+- [x] 新增 `scripts/e2e-full-conversation-real-env.sh`，覆盖：
+  - 会话激活、chat 历史创建/更新、`/api/runs/start` SSE 流、run bind
+  - callback `todo.update` / `human_loop.requested` / `human_loop.resolved` / `message.stop` / `run.finished`
+  - 查询 `todos` / `todo events` / `human-loop resolved`
+  - DB 记录校验（`agent_runs`/`run_events`/`human_loop_requests`/`usage_logs`）
+  - cleanup idle/stopped 与 worker 删除态校验
+- [x] 针对真实链路慢请求补充重试策略（cleanup 接口 502 超时重试）。
+- [x] 脚本内置迁移补偿（001/002/003），避免历史 volume 漏迁移导致 `chat_sessions` 缺失。
+
+**Verification Criteria**:
+- [x] `bash scripts/e2e-full-conversation-real-env.sh` 通过。
+- [x] `bash scripts/pre-commit-check.sh` 通过。
+
+**Exit Criteria**:
+- 真实环境“对话闭环”具备稳定可复现实验脚本，可作为 Phase 17/18 的真实联调验收门禁。
+
+---
+
 ## 执行顺序
 1. Phase 8（已完成）
 2. Phase 9（已完成）
@@ -345,7 +377,8 @@
 9. Phase 16（已完成）
 10. Phase 17（进行中）
 11. Phase 18（进行中）
+12. Phase 19（进行中）
 
 ## 当前阶段
-- `in_progress`: Phase 18（网关/BFF 与部署边界拆分）
+- `in_progress`: Phase 19（真实环境完整对话闭环 E2E 稳定化）
 - `next_commit`: `test(phase-19): stabilize full conversation real-env e2e`

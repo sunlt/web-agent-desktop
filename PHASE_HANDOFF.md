@@ -1258,3 +1258,61 @@
 
 ### next_phase
 - Phase 18/19：真实环境（compose + external executor）完整对话闭环 E2E 稳定化与回归收敛。
+
+---
+
+## Phase 19: 真实环境完整对话闭环 E2E 稳定化
+
+### objective
+- 在真实部署拓扑（`gateway + executor-manager + control-plane + executor + postgres + rustfs`）下，固化可重复执行的“完整对话闭环”验证能力，并消除对外部模型依赖。
+
+### inputs
+- `REMAINING_DEVELOPMENT_TASKS.md` 中 Phase 17 的最后一条未完成验证项（真实环境完整对话闭环）。
+- 当前 compose 链路已可运行，但 `runs/start` 依赖外部 provider 运行时，稳定性受环境影响。
+- 现有真实链路脚本仅覆盖 session-worker 生命周期与 callback/sync，不覆盖 chat + run 对话路径。
+
+### actions
+- control-plane 增加可切换 provider 模式：
+  - 新增 `control-plane/src/providers/scripted-provider.ts`，实现 `opencode/claude-code/codex-cli` 的 deterministic scripted adapter。
+  - `control-plane/src/app.ts` 增加 `CONTROL_PLANE_PROVIDER_MODE=scripted` 分支，默认保持真实 provider。
+- compose 环境透传：
+  - `docker-compose.yml` 为 `control-plane` 增加 `CONTROL_PLANE_PROVIDER_MODE=${CONTROL_PLANE_PROVIDER_MODE:-real}`。
+- 新增真实环境闭环脚本：
+  - `scripts/e2e-full-conversation-real-env.sh`，覆盖：
+    - 会话激活
+    - chat 历史创建/更新
+    - `/api/runs/start` SSE 事件流校验（started/message/todo/finished/closed）
+    - run bind
+    - callback：`todo.update`、`human_loop.requested`、`human_loop.resolved`、`message.stop`、`run.finished`
+    - 查询：`todos`、`todo events`、`human-loop resolved`
+    - DB 校验：`agent_runs`、`run_events`、`human_loop_requests`、`usage_logs`
+    - cleanup idle/stopped + worker 删除态确认
+  - 针对真实链路 `cleanup` 超时 `502` 增加请求重试策略。
+  - 增加 migration 补偿步骤（001/002/003），解决历史 volume 下 `chat_sessions` 缺失问题。
+
+### outputs
+- `control-plane/src/providers/scripted-provider.ts`
+- `control-plane/src/app.ts`
+- `docker-compose.yml`
+- `scripts/e2e-full-conversation-real-env.sh`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `cd control-plane && npm run lint && npm run typecheck`
+  - `bash scripts/e2e-full-conversation-real-env.sh`
+  - `bash scripts/pre-commit-check.sh`
+- results:
+  - control-plane lint/typecheck 通过。
+  - phase19 real-env 脚本完整通过（含 DB 记录断言、cleanup 删除断言）。
+  - 全仓 pre-commit 检查通过。
+
+### gate_result
+- **Pass**（真实环境完整对话闭环验证已可稳定复现，Phase 17 最后一条真实联调验证项可视为完成）
+
+### risks
+- `scripted` provider 模式主要用于基础设施联调稳定性；真实模型质量与工具链行为仍需在真实 provider 模式下另行压测。
+- cleanup 路由在极端慢 I/O 下仍可能出现网关超时，当前通过脚本重试缓解，后续可考虑服务端异步化或更细粒度超时配置。
+
+### next_phase
+- Phase 20：补齐 `portal` 真实后端 Playwright smoke（非 mock API）与真实 provider 模式压测基线。

@@ -7,6 +7,7 @@ import { createLogger, type Logger } from "./observability/logger.js";
 import { ClaudeCodeProviderAdapter } from "./providers/claude-code-provider.js";
 import { CodexCliProviderAdapter } from "./providers/codex-cli-provider.js";
 import { OpencodeProviderAdapter } from "./providers/opencode-provider.js";
+import { createScriptedProviderAdapters } from "./providers/scripted-provider.js";
 import { ProviderRegistry } from "./providers/provider-registry.js";
 import type { AgentProviderAdapter } from "./providers/types.js";
 import type { DockerClient } from "./ports/docker-client.js";
@@ -99,11 +100,7 @@ export function createControlPlaneApp(
     lifecycleManager;
 
   const providerRegistry = new ProviderRegistry(
-    options.providerAdapters ?? [
-      new OpencodeProviderAdapter(),
-      new ClaudeCodeProviderAdapter(),
-      new CodexCliProviderAdapter(),
-    ],
+    options.providerAdapters ?? createDefaultProviderAdaptersFromEnv(),
   );
 
   const runOrchestrator = new RunOrchestrator(providerRegistry);
@@ -165,6 +162,18 @@ export function createControlPlaneApp(
   );
 
   return app;
+}
+
+function createDefaultProviderAdaptersFromEnv(): AgentProviderAdapter[] {
+  if (process.env.CONTROL_PLANE_PROVIDER_MODE === "scripted") {
+    return createScriptedProviderAdapters();
+  }
+
+  return [
+    new OpencodeProviderAdapter(),
+    new ClaudeCodeProviderAdapter(),
+    new CodexCliProviderAdapter(),
+  ];
 }
 
 function createExecutorManagerSessionSyncClientFromEnv():
