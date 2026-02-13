@@ -112,6 +112,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+safe_provider_id="$(printf '%s' "$PROVIDER" | tr -c 'A-Za-z0-9_.-' '_')"
+run_id_prefix="run-phase21-${safe_provider_id}-$$"
+precheck_run_id_prefix="run-phase21-precheck-${safe_provider_id}-$$"
+fallback_run_id_prefix="run-phase21-fallback-${safe_provider_id}-$$"
+
 prepare_local_provider_env() {
   if [[ "$BOOTSTRAP_LOCAL_PROVIDER_ENV" != "1" ]]; then
     return 0
@@ -651,7 +656,7 @@ run_scripted_fallback_probe() {
   local fallback_run_id
   local fallback_prompt
   local fallback_start_epoch
-  fallback_run_id="run-phase21-fallback-$(date +%s)"
+  fallback_run_id="${fallback_run_id_prefix}-$(date +%s)"
   fallback_prompt="phase21-fallback-$(date +%s)"
   fallback_start_epoch="$(date +%s)"
 
@@ -699,7 +704,7 @@ check_provider_runtime
 
 if [[ "$PRECHECK_ENABLED" == "1" ]]; then
   preflight_start_epoch="$(date +%s)"
-  preflight_run_id="run-phase21-precheck-$(date +%s)"
+  preflight_run_id="${precheck_run_id_prefix}-$(date +%s)"
   preflight_prompt="phase21-precheck-$(date +%s)"
   log "preflight run: runId=${preflight_run_id}, timeout=${PRECHECK_TIMEOUT_SEC}s"
   preflight_result="$(run_single_case "$preflight_run_id" "$preflight_prompt" "$PRECHECK_TIMEOUT_SEC" "preflight")"
@@ -719,7 +724,7 @@ log "stress config: iterations=${ITERATIONS}, provider=${PROVIDER}, model=${MODE
 
 for ((i = 1; i <= ITERATIONS; i += 1)); do
   run_start_epoch="$(date +%s)"
-  run_id="run-phase21-$(date +%s)-${i}"
+  run_id="${run_id_prefix}-$(date +%s)-${i}"
   prompt="phase21-provider-stress-${i}-$(date +%s)"
   log "run ${i}/${ITERATIONS}: runId=${run_id}"
   parse_result="$(run_single_case "$run_id" "$prompt" "$RUN_TIMEOUT_SEC" "stress")"
