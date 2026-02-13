@@ -422,6 +422,9 @@
 - [x] 增加失败样本自动归档（runId 级别），落盘 `result/sse/raw logs` 证据集。
 - [x] 增加跨服务日志抓取（`gateway/control-plane/executor-manager/executor`）并写入归档目录。
 - [x] 报告新增 `failureArtifacts` 列表与 `failureArtifactCount`，支持按样本路径快速回溯。
+- [x] 脚本支持 `STRESS_SUMMARY_OUT` 导出稳定 JSON 摘要，便于 CI 消费。
+- [x] CI 工作流新增可选 Phase21 压测开关（基于 `vars.CI_PHASE21_REAL_PROVIDER`），支持 strict 阈值配置与产物上传。
+- [x] CI Job Summary 新增压测核心指标展示（successRate / failureArtifactCount / 报告路径）。
 
 **Verification Criteria**:
 - [x] `bash scripts/e2e-portal-real-provider-stress.sh` 可执行并输出报告。
@@ -450,4 +453,4 @@
 
 ## 当前阶段
 - `in_progress`: Phase 21（真实 Provider 压测基线与 Flaky 收敛）
-- `next_commit`: `test(phase-21): archive failure samples and service logs in stress reports`
+- `next_commit`: `ci(phase-21): add optional real-provider stress gate and summary artifact`

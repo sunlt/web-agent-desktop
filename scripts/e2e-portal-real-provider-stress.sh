@@ -78,6 +78,7 @@ ARCHIVE_MAX_FAILURES="${STRESS_ARCHIVE_MAX_FAILURES:-3}"
 ARCHIVE_LOG_SERVICES="${STRESS_ARCHIVE_LOG_SERVICES:-gateway control-plane executor-manager executor}"
 ARCHIVE_LOG_TAIL="${STRESS_ARCHIVE_LOG_TAIL:-250}"
 REPORT_DIR="${STRESS_REPORT_DIR:-observability/reports}"
+SUMMARY_OUT="${STRESS_SUMMARY_OUT:-}"
 
 mkdir -p "$REPORT_DIR"
 report_path="${REPORT_DIR}/phase21-provider-stress-$(date +%Y%m%d-%H%M%S).json"
@@ -777,6 +778,23 @@ log "stress summary: ${summary_json}"
 log "stress report written: ${report_path}"
 log "stress markdown summary written: ${report_md_path}"
 log "stress failure artifacts dir: ${artifact_dir}"
+
+if [[ -n "$SUMMARY_OUT" ]]; then
+  mkdir -p "$(dirname "$SUMMARY_OUT")"
+  summary_payload="$(printf '%s' "$summary_json" | REPORT_PATH="$report_path" REPORT_MD_PATH="$report_md_path" ARTIFACT_DIR="$artifact_dir" node -e '
+    const fs = require("node:fs");
+    const summary = JSON.parse(fs.readFileSync(0, "utf8"));
+    const payload = {
+      reportPath: process.env.REPORT_PATH,
+      reportMarkdownPath: process.env.REPORT_MD_PATH,
+      artifactDir: process.env.ARTIFACT_DIR,
+      summary,
+    };
+    process.stdout.write(JSON.stringify(payload, null, 2));
+  ')"
+  printf '%s\n' "$summary_payload" >"$SUMMARY_OUT"
+  log "stress summary payload written: ${SUMMARY_OUT}"
+fi
 
 pass_check=$(printf '%s' "$summary_json" | THRESHOLD="$SUCCESS_RATE_THRESHOLD" node -e '
   const fs = require("node:fs");

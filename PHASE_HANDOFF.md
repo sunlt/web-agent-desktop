@@ -1523,3 +1523,52 @@
 
 ### next_phase
 - Phase 21 后续子阶段：在 CI 增加可选 strict 阈值执行档（仅在 provider 凭据就绪时启用），并输出失败样本摘要到 CI artifact。
+
+---
+
+## Phase 21: 真实 Provider 压测收敛（CI 可选门禁）
+
+### objective
+- 把本地可复现的真实 provider 压测接入 CI 的“可选门禁”路径，在凭据就绪时可开启 strict 阈值，同时保留报告与失败样本产物。
+
+### inputs
+- 压测脚本已支持预检、失败分类、样本归档与 Markdown 报告。
+- 现有 CI 仅覆盖 lint/typecheck/portal E2E，未接入 real-provider 压测。
+
+### actions
+- 扩展 `scripts/e2e-portal-real-provider-stress.sh`：
+  - 新增 `STRESS_SUMMARY_OUT`，输出稳定 JSON 摘要（报告路径 + summary 指标）。
+- 扩展 `.github/workflows/ci.yml`：
+  - 新增 job 级可配变量（默认关闭）：
+    - `CI_PHASE21_REAL_PROVIDER`
+    - `CI_PHASE21_REAL_PROVIDER_STRICT`
+    - `CI_PHASE21_REAL_PROVIDER_THRESHOLD`
+    - `CI_PHASE21_REAL_PROVIDER_ITERATIONS`
+  - 当 `CI_PHASE21_REAL_PROVIDER=1` 时执行真实 provider 压测脚本。
+  - 将压测摘要写入 `GITHUB_STEP_SUMMARY`。
+  - 上传 `observability/reports` 作为 CI artifact（便于下载 `json/md/artifacts` 全量证据）。
+
+### outputs
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `.github/workflows/ci.yml`
+- `PHASE_HANDOFF.md`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `STRESS_ITERATIONS=1 STRESS_SUMMARY_OUT=/tmp/phase21-ci-summary-local.json bash scripts/e2e-portal-real-provider-stress.sh`
+  - `bash scripts/pre-commit-check.sh`
+- results:
+  - `/tmp/phase21-ci-summary-local.json` 生成成功（含 report/artifact 路径与 summary 指标）。
+  - 压测脚本可继续输出 `json/md/artifacts`。
+  - 全仓 pre-commit 检查通过。
+
+### gate_result
+- **Pass**（CI 可选门禁入口与摘要产物能力已落地）
+
+### risks
+- CI 默认关闭真实 provider 压测；若仓库未配置凭据或网络策略，开启后可能出现稳定失败。
+- 当前 Summary 为聚合指标，后续可补 `topFailures` 结构化表格展示以便快速定位。
+
+### next_phase
+- Phase 21 后续子阶段：补 provider 凭据健康检查脚本与 CI 失败提示模板，区分“环境未就绪”与“能力回归”。
