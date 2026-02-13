@@ -73,12 +73,14 @@ STRICT_MODE="${STRESS_STRICT:-0}"
 PRECHECK_ENABLED="${STRESS_PRECHECK_ENABLED:-1}"
 AUTO_FALLBACK_SCRIPTED="${STRESS_AUTO_FALLBACK_SCRIPTED:-0}"
 FALLBACK_RUN_TIMEOUT_SEC="${STRESS_FALLBACK_TIMEOUT_SEC:-45}"
+PROVIDER_RUNTIME_CONTAINER="${STRESS_PROVIDER_RUNTIME_CONTAINER:-executor}"
 ARCHIVE_ENABLED="${STRESS_ARCHIVE_ENABLED:-1}"
 ARCHIVE_MAX_FAILURES="${STRESS_ARCHIVE_MAX_FAILURES:-3}"
 ARCHIVE_LOG_SERVICES="${STRESS_ARCHIVE_LOG_SERVICES:-gateway control-plane executor-manager executor}"
 ARCHIVE_LOG_TAIL="${STRESS_ARCHIVE_LOG_TAIL:-250}"
 REPORT_DIR="${STRESS_REPORT_DIR:-observability/reports}"
 SUMMARY_OUT="${STRESS_SUMMARY_OUT:-}"
+SKIP_COMPOSE_UP="${STRESS_SKIP_COMPOSE_UP:-0}"
 
 mkdir -p "$REPORT_DIR"
 report_path="${REPORT_DIR}/phase21-provider-stress-$(date +%Y%m%d-%H%M%S).json"
@@ -189,13 +191,19 @@ capture_failure_artifact() {
 }
 
 check_provider_runtime() {
-  log "provider runtime precheck: provider=${PROVIDER}"
+  log "provider runtime precheck: provider=${PROVIDER}, container=${PROVIDER_RUNTIME_CONTAINER}"
+
+  if docker inspect "$PROVIDER_RUNTIME_CONTAINER" >/dev/null 2>&1; then
+    record_runtime_check "provider_runtime_container" "pass" "runtime container exists: ${PROVIDER_RUNTIME_CONTAINER}"
+  else
+    record_runtime_check "provider_runtime_container" "fail" "runtime container not found: ${PROVIDER_RUNTIME_CONTAINER}"
+    return 0
+  fi
 
   if docker inspect executor >/dev/null 2>&1; then
     record_runtime_check "executor_container" "pass" "executor container exists"
   else
-    record_runtime_check "executor_container" "fail" "executor container not found"
-    return 0
+    record_runtime_check "executor_container" "warn" "executor container not found"
   fi
 
   local cli_name=""
@@ -226,23 +234,23 @@ check_provider_runtime() {
   esac
 
   local binary_path
-  binary_path="$(docker exec executor sh -lc "command -v ${cli_name} || true" 2>/dev/null | tr -d '\r' | head -n 1)"
+  binary_path="$(docker exec "$PROVIDER_RUNTIME_CONTAINER" sh -lc "command -v ${cli_name} || true" 2>/dev/null | tr -d '\r' | head -n 1)"
   if [[ -n "$binary_path" ]]; then
-    record_runtime_check "provider_binary" "pass" "${cli_name} found at ${binary_path}"
+    record_runtime_check "provider_binary" "pass" "${cli_name} found at ${binary_path} (${PROVIDER_RUNTIME_CONTAINER})"
     local version_line
-    version_line="$(docker exec executor sh -lc "${cli_name} --version 2>/dev/null | head -n 1 || true" | tr -d '\r')"
+    version_line="$(docker exec "$PROVIDER_RUNTIME_CONTAINER" sh -lc "${cli_name} --version 2>/dev/null | head -n 1 || true" | tr -d '\r')"
     if [[ -n "$version_line" ]]; then
       record_runtime_check "provider_version" "pass" "$version_line"
     else
       record_runtime_check "provider_version" "warn" "${cli_name} version output is empty"
     fi
   else
-    record_runtime_check "provider_binary" "fail" "${cli_name} not found in executor container"
+    record_runtime_check "provider_binary" "fail" "${cli_name} not found in ${PROVIDER_RUNTIME_CONTAINER}"
     record_runtime_check "provider_version" "warn" "skip version check because binary missing"
   fi
 
   if [[ -n "$auth_check_cmd" ]]; then
-    if docker exec executor sh -lc "$auth_check_cmd" >/dev/null 2>&1; then
+    if docker exec "$PROVIDER_RUNTIME_CONTAINER" sh -lc "$auth_check_cmd" >/dev/null 2>&1; then
       record_runtime_check "provider_auth_hint" "pass" "auth footprint exists (${auth_hint})"
     else
       record_runtime_check "provider_auth_hint" "warn" "auth footprint missing (${auth_hint})"
@@ -554,8 +562,12 @@ run_scripted_fallback_probe() {
   wait_for_health "gateway(real-restored)" "http://127.0.0.1:3001/health" 60 2
 }
 
-log "starting compose services in real provider mode: ${COMPOSE_SERVICES[*]}"
-CONTROL_PLANE_PROVIDER_MODE=real docker compose up -d --build "${COMPOSE_SERVICES[@]}"
+if [[ "$SKIP_COMPOSE_UP" != "1" ]]; then
+  log "starting compose services in real provider mode: ${COMPOSE_SERVICES[*]}"
+  CONTROL_PLANE_PROVIDER_MODE=real docker compose up -d --build "${COMPOSE_SERVICES[@]}"
+else
+  log "skip compose startup because STRESS_SKIP_COMPOSE_UP=1"
+fi
 
 wait_for_postgres
 apply_db_migrations

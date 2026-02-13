@@ -12,6 +12,7 @@ import type { WorkspaceSyncClient } from "./ports/workspace-sync-client.js";
 import { InMemorySessionWorkerRepository } from "./repositories/in-memory-session-worker-repository.js";
 import { PostgresSessionWorkerRepository } from "./repositories/postgres-session-worker-repository.js";
 import type { SessionWorkerRepository } from "./repositories/session-worker-repository.js";
+import { createProviderRunsRouter } from "./routes/provider-runs.js";
 import { createSessionWorkersRouter } from "./routes/session-workers.js";
 import { LifecycleManager } from "./services/lifecycle-manager.js";
 
@@ -120,6 +121,17 @@ export function createExecutorManagerApp(
       executorBaseUrl: executorBaseUrl ?? null,
     });
   });
+
+  if (executorBaseUrl) {
+    app.use(
+      "/api",
+      createProviderRunsRouter({
+        executorBaseUrl,
+        executorToken: process.env.EXECUTOR_AUTH_TOKEN,
+        timeoutMs: parseNumber(process.env.EXECUTOR_RUN_TIMEOUT_MS, 1_800_000),
+      }),
+    );
+  }
 
   app.use("/api", createSessionWorkersRouter(lifecycleManager));
 

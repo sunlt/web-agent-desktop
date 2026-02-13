@@ -12,14 +12,6 @@ services:
       - CONTROL_PLANE_ENABLE_SESSION_WORKERS_ROUTER=0
       - CONTROL_PLANE_PROVIDER_MODE=${CONTROL_PLANE_PROVIDER_MODE:-real}
       - EXECUTOR_MANAGER_BASE_URL=http://executor-manager:3010
-      - EXECUTOR_BASE_URL=http://executor:8090
-      - EXECUTOR_AUTH_TOKEN=executor-secret
-      - EXECUTOR_TIMEOUT_MS=30000
-      - EXECUTOR_MAX_RETRIES=1
-      - EXECUTOR_RETRY_DELAY_MS=200
-      - EXECUTOR_RETRY_STATUS_CODES=500,502,503,504
-      - EXECUTOR_CONTAINER_IMAGE=executor:latest
-      - EXECUTOR_CONTAINER_NETWORK=agent-network
       - PGHOST=pgsql
       - PGPORT=5432
       - PGUSER=app
@@ -52,6 +44,9 @@ services:
       - EXECUTOR_S3_ACCESS_KEY=rustfsadmin
       - EXECUTOR_S3_SECRET_KEY=rustfsadmin
       - EXECUTOR_S3_BUCKET=app
+      - EXECUTOR_PROVIDER_MODE=${EXECUTOR_PROVIDER_MODE:-real}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     volumes:
       - executor_workspace:/tmp/executor-workspaces
     depends_on:
@@ -126,6 +121,7 @@ services:
       - EXECUTOR_BASE_URL=http://executor:8090
       - EXECUTOR_AUTH_TOKEN=executor-secret
       - EXECUTOR_TIMEOUT_MS=30000
+      - EXECUTOR_RUN_TIMEOUT_MS=1800000
       - EXECUTOR_MAX_RETRIES=1
       - EXECUTOR_RETRY_DELAY_MS=200
       - EXECUTOR_RETRY_STATUS_CODES=500,502,503,504

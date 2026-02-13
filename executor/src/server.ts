@@ -1,6 +1,13 @@
 import express, { type Request, type Response } from "express";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
+import type { ChatMessage, ProviderKind } from "./providers/types.js";
+import { ClaudeCodeProviderAdapter } from "./providers/claude-code-provider.js";
+import { CodexCliProviderAdapter } from "./providers/codex-cli-provider.js";
+import { OpencodeProviderAdapter } from "./providers/opencode-provider.js";
+import { ProviderRegistry } from "./providers/provider-registry.js";
+import { createScriptedProviderAdapters } from "./providers/scripted-provider.js";
+import { ProviderRunner } from "./services/provider-runner.js";
 import {
   CreateBucketCommand,
   HeadBucketCommand,
@@ -44,6 +51,7 @@ const workspaceRoot = resolve(
   process.env.EXECUTOR_WORKSPACE_ROOT ?? "/tmp/executor-workspaces",
 );
 const s3Bucket = process.env.EXECUTOR_S3_BUCKET ?? "app";
+const providerMode = process.env.EXECUTOR_PROVIDER_MODE ?? "real";
 
 const s3Client = new S3Client({
   region: process.env.EXECUTOR_S3_REGION ?? "us-east-1",
@@ -58,6 +66,9 @@ const s3Client = new S3Client({
 const events: EventItem[] = [];
 const maxEvents = 2000;
 let ensureBucketPromise: Promise<void> | null = null;
+const providerRunner = new ProviderRunner(
+  new ProviderRegistry(resolveProviderAdapters(providerMode)),
+);
 
 app.get("/health", (_req, res) => {
   res.json({
@@ -72,6 +83,127 @@ app.get("/events", (_req, res) => {
     total: events.length,
     items: events,
   });
+});
+
+app.post("/provider-runs/start", withAuth, async (req, res) => {
+  try {
+    const body = req.body as {
+      runId?: string;
+      provider?: unknown;
+      model?: unknown;
+      messages?: unknown;
+      resumeSessionId?: unknown;
+      executionProfile?: unknown;
+      tools?: unknown;
+      providerOptions?: unknown;
+      requireHumanLoop?: unknown;
+    };
+    const runId = requireString(body.runId, "runId");
+    const provider = parseProviderKind(body.provider);
+    const model = requireString(body.model, "model");
+    const messages = parseChatMessages(body.messages);
+    const resumeSessionId = optionalString(body.resumeSessionId);
+    const executionProfile = optionalString(body.executionProfile);
+    const tools = asObjectRecord(body.tools);
+    const providerOptions = asObjectRecord(body.providerOptions);
+    const requireHumanLoop = body.requireHumanLoop === true;
+
+    const result = await providerRunner.startRun({
+      runId,
+      provider,
+      model,
+      messages,
+      ...(resumeSessionId ? { resumeSessionId } : {}),
+      ...(executionProfile ? { executionProfile } : {}),
+      ...(tools ? { tools } : {}),
+      ...(providerOptions ? { providerOptions } : {}),
+      ...(requireHumanLoop ? { requireHumanLoop } : {}),
+    });
+
+    if (!result.accepted) {
+      return res.status(409).json(result);
+    }
+
+    providerRunner.ensurePump(runId);
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+app.get("/provider-runs/:runId/stream", withAuth, async (req, res) => {
+  const runId = req.params.runId;
+  if (!providerRunner.hasRun(runId)) {
+    return res.status(404).json({ error: "run not found" });
+  }
+
+  providerRunner.ensurePump(runId);
+
+  res.status(200);
+  res.setHeader("content-type", "text/event-stream; charset=utf-8");
+  res.setHeader("cache-control", "no-cache");
+  res.setHeader("connection", "keep-alive");
+  res.flushHeaders?.();
+
+  const afterSeq = parseAfterSeq(req);
+
+  const unsubscribe = providerRunner.subscribe({
+    runId,
+    afterSeq,
+    onEvent: (entry) => {
+      res.write(`id: ${entry.seq}\n`);
+      res.write(`event: ${entry.event.type}\n`);
+      res.write(`data: ${JSON.stringify(entry.event)}\n\n`);
+    },
+    onClose: () => {
+      res.write(`event: provider.closed\ndata: ${JSON.stringify({ runId })}\n\n`);
+      res.end();
+    },
+  });
+
+  const heartbeat = setInterval(() => {
+    res.write(": heartbeat\n\n");
+  }, 15_000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+});
+
+app.post("/provider-runs/:runId/stop", withAuth, async (req, res) => {
+  try {
+    const stopped = await providerRunner.stopRun(req.params.runId);
+    if (!stopped) {
+      return res.status(404).json({ error: "run not found or not running" });
+    }
+    return res.json({ ok: true });
+  } catch (error) {
+    return handleError(res, error);
+  }
+});
+
+app.post("/provider-runs/:runId/human-loop/reply", withAuth, async (req, res) => {
+  try {
+    const body = req.body as { questionId?: unknown; answer?: unknown };
+    const questionId = requireString(body.questionId, "questionId");
+    const answer = requireString(body.answer, "answer");
+    const result = await providerRunner.replyHumanLoop({
+      runId: req.params.runId,
+      questionId,
+      answer,
+    });
+    if (!result.accepted) {
+      const status = result.reason === "run not found" ? 404 : 409;
+      return res.status(status).json({
+        ok: false,
+        reason: result.reason ?? "reply rejected",
+      });
+    }
+    return res.json({ ok: true });
+  } catch (error) {
+    return handleError(res, error);
+  }
 });
 
 app.post("/workspace/restore", withAuth, async (req, res) => {
@@ -571,6 +703,78 @@ function handleError(res: Response, error: unknown): void {
   res.status(500).json({
     error: message,
   });
+}
+
+function parseChatMessages(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("messages is required");
+  }
+
+  const parsed: ChatMessage[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      throw new Error("invalid message item");
+    }
+    const message = item as { role?: unknown; content?: unknown };
+    const role = parseMessageRole(message.role);
+    const content = requireString(message.content, "content");
+    parsed.push({ role, content });
+  }
+
+  return parsed;
+}
+
+function parseMessageRole(value: unknown): ChatMessage["role"] {
+  if (value === "system" || value === "user" || value === "assistant") {
+    return value;
+  }
+  throw new Error(`invalid message role: ${String(value)}`);
+}
+
+function parseProviderKind(value: unknown): ProviderKind {
+  if (value === "claude-code" || value === "opencode" || value === "codex-cli") {
+    return value;
+  }
+  throw new Error(`invalid provider: ${String(value)}`);
+}
+
+function asObjectRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function parseAfterSeq(req: Request): number {
+  const queryCursor =
+    typeof req.query?.cursor === "string" ? req.query.cursor : undefined;
+  const lastEventId = req.headers["last-event-id"];
+  const headerCursor =
+    typeof lastEventId === "string"
+      ? lastEventId
+      : Array.isArray(lastEventId)
+        ? lastEventId[0]
+        : undefined;
+  const raw = queryCursor ?? headerCursor;
+  if (!raw) {
+    return 0;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return 0;
+  }
+  return parsed;
+}
+
+function resolveProviderAdapters(mode: string) {
+  if (mode === "scripted") {
+    return createScriptedProviderAdapters();
+  }
+  return [
+    new OpencodeProviderAdapter(),
+    new ClaudeCodeProviderAdapter(),
+    new CodexCliProviderAdapter(),
+  ];
 }
 
 async function ensureBucket(): Promise<void> {

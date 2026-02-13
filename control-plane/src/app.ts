@@ -6,6 +6,7 @@ import { ExecutorManagerSessionSyncClient } from "./adapters/executor-manager-se
 import { createLogger, type Logger } from "./observability/logger.js";
 import { ClaudeCodeProviderAdapter } from "./providers/claude-code-provider.js";
 import { CodexCliProviderAdapter } from "./providers/codex-cli-provider.js";
+import { createExecutorManagerProviderAdapters } from "./providers/executor-manager-provider.js";
 import { OpencodeProviderAdapter } from "./providers/opencode-provider.js";
 import { createScriptedProviderAdapters } from "./providers/scripted-provider.js";
 import { ProviderRegistry } from "./providers/provider-registry.js";
@@ -167,6 +168,19 @@ export function createControlPlaneApp(
 function createDefaultProviderAdaptersFromEnv(): AgentProviderAdapter[] {
   if (process.env.CONTROL_PLANE_PROVIDER_MODE === "scripted") {
     return createScriptedProviderAdapters();
+  }
+
+  const executorManagerBaseUrl = process.env.EXECUTOR_MANAGER_BASE_URL;
+  if (executorManagerBaseUrl) {
+    const rawTimeout = Number(
+      process.env.EXECUTOR_MANAGER_PROVIDER_TIMEOUT_MS ?? 180_000,
+    );
+    const timeoutMs =
+      Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 180_000;
+    return createExecutorManagerProviderAdapters({
+      baseUrl: executorManagerBaseUrl,
+      timeoutMs,
+    });
   }
 
   return [
