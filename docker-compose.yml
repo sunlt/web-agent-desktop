@@ -45,6 +45,11 @@ services:
       - EXECUTOR_PROVIDER_MODE=${EXECUTOR_PROVIDER_MODE:-real}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
+      - OPENCODE_R2AI_API_KEY=${OPENCODE_R2AI_API_KEY:-}
+      - OPENCODE_R2AI_BASE_URL=${OPENCODE_R2AI_BASE_URL:-}
     volumes:
       - executor_workspace:/tmp/executor-workspaces
     depends_on:
@@ -120,6 +125,7 @@ services:
       - EXECUTOR_AUTH_TOKEN=executor-secret
       - EXECUTOR_TIMEOUT_MS=30000
       - EXECUTOR_RUN_TIMEOUT_MS=1800000
+      - EXECUTOR_RUN_TIMEOUT_TEMPLATE_JSON=${EXECUTOR_RUN_TIMEOUT_TEMPLATE_JSON:-}
       - EXECUTOR_MAX_RETRIES=1
       - EXECUTOR_RETRY_DELAY_MS=200
       - EXECUTOR_RETRY_STATUS_CODES=500,502,503,504
@@ -271,6 +277,7 @@ services:
       - ./control-plane/sql/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
       - ./control-plane/sql/002_rbac_and_file_acl.sql:/docker-entrypoint-initdb.d/002_rbac_and_file_acl.sql:ro
       - ./control-plane/sql/003_chat_history.sql:/docker-entrypoint-initdb.d/003_chat_history.sql:ro
+      - ./control-plane/sql/004_app_runtime_profiles.sql:/docker-entrypoint-initdb.d/004_app_runtime_profiles.sql:ro
     networks:
       - agent-network
     restart: always

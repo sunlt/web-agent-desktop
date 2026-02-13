@@ -58,31 +58,31 @@ fi
 cli_name=""
 auth_file_cmd=""
 auth_hint=""
-auth_env_name=""
+auth_env_names=""
 case "$PROVIDER" in
   codex-cli|codex-app-server)
     cli_name="codex"
     auth_file_cmd='[ -f /root/.codex/auth.json ] || [ -f /root/.codex/config.json ]'
     auth_hint="/root/.codex/auth.json or /root/.codex/config.json"
-    auth_env_name="OPENAI_API_KEY"
+    auth_env_names="OPENAI_API_KEY"
     ;;
   claude-code)
     cli_name="claude"
-    auth_file_cmd='[ -f /root/.claude.json ] || [ -d /root/.config/claude ]'
-    auth_hint="/root/.claude.json or /root/.config/claude"
-    auth_env_name="ANTHROPIC_API_KEY"
+    auth_file_cmd='[ -f /root/.claude/settings.json ] || [ -f /root/.claude.json ] || [ -d /root/.config/claude ]'
+    auth_hint="/root/.claude/settings.json or /root/.claude.json or /root/.config/claude"
+    auth_env_names="ANTHROPIC_AUTH_TOKEN,ANTHROPIC_API_KEY"
     ;;
   opencode)
     cli_name="opencode"
-    auth_file_cmd=''
-    auth_hint="no provider-specific auth file check configured"
-    auth_env_name="OPENAI_API_KEY"
+    auth_file_cmd='[ -f /root/.config/opencode/opencode.json ] || [ -f /root/.config/opencode/config.json ]'
+    auth_hint="/root/.config/opencode/opencode.json or /root/.config/opencode/config.json"
+    auth_env_names="OPENCODE_R2AI_API_KEY,OPENAI_API_KEY"
     ;;
   *)
     cli_name="$PROVIDER"
     auth_file_cmd=''
     auth_hint="unknown provider auth footprint"
-    auth_env_name=""
+    auth_env_names=""
     ;;
 esac
 
@@ -114,12 +114,18 @@ if docker inspect "$RUNTIME_CONTAINER" >/dev/null 2>&1; then
   fi
 
   auth_env_ok="0"
-  if [[ -n "$auth_env_name" ]]; then
-    if docker exec "$RUNTIME_CONTAINER" sh -lc "[ -n \"\${${auth_env_name}:-}\" ]" >/dev/null 2>&1; then
-      auth_env_ok="1"
-      record_check "provider_auth_env" "pass" "${auth_env_name} present in ${RUNTIME_CONTAINER}"
-    else
-      record_check "provider_auth_env" "warn" "${auth_env_name} missing in ${RUNTIME_CONTAINER}"
+  if [[ -n "$auth_env_names" ]]; then
+    IFS=',' read -r -a auth_env_name_list <<<"$auth_env_names"
+    for env_name in "${auth_env_name_list[@]}"; do
+      if docker exec "$RUNTIME_CONTAINER" sh -lc "[ -n \"\${${env_name}:-}\" ]" >/dev/null 2>&1; then
+        auth_env_ok="1"
+        record_check "provider_auth_env" "pass" "${env_name} present in ${RUNTIME_CONTAINER}"
+        break
+      fi
+    done
+
+    if [[ "$auth_env_ok" != "1" ]]; then
+      record_check "provider_auth_env" "warn" "none of [${auth_env_names}] is present in ${RUNTIME_CONTAINER}"
     fi
   else
     record_check "provider_auth_env" "warn" "no auth env check configured for provider ${PROVIDER}"

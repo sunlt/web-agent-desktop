@@ -1848,3 +1848,91 @@
 
 ### next_phase
 - Phase 26：将本机凭据注入能力产品化为可控选项（仅本地调试启用），并补充 provider/model 维度的超时模板。
+
+## Phase 26: 本地凭据注入产品化 + App Runtime 注册 + Provider/Model 分层超时模板
+
+### objective
+- 将“本机凭据注入”从临时手工操作收敛为可复用脚本能力。
+- 支持在 app 注册时声明 provider/model/credential env/providerOptions/timeout，并在 run 启动时自动生效。
+- 在 executor-manager 引入 provider/model 分层超时模板，避免统一超时导致误判。
+
+### inputs
+- 已完成 Phase 25 的凭据门禁与超时基线治理。
+- 用户补充：`claude-code` 以 `~/.claude/settings.json` 为准；`opencode` 使用 `~/.config/opencode/opencode.json`。
+
+### actions
+- 本地凭据注入产品化：
+  - 新增脚本 `scripts/bootstrap-local-provider-env.sh`，从本机配置提取凭据并生成 `.tmp/provider-local.env`，可选 `recreate executor` 注入环境变量。
+  - `docker-compose.yml` 中 `executor` 新增环境变量映射：
+    - `ANTHROPIC_AUTH_TOKEN/ANTHROPIC_BASE_URL/ANTHROPIC_MODEL`
+    - `OPENCODE_R2AI_API_KEY/OPENCODE_R2AI_BASE_URL`
+  - `scripts/provider-runtime-health-check.sh` 与 `scripts/e2e-portal-real-provider-stress.sh`：
+    - `claude-code` auth footprint 更新为 `/root/.claude/settings.json`。
+    - auth env 检查支持多候选（如 `ANTHROPIC_AUTH_TOKEN,ANTHROPIC_API_KEY`）。
+    - stress 新增 `STRESS_BOOTSTRAP_LOCAL_PROVIDER_ENV` 可选自动注入。
+- app 注册与 runtime 配置：
+  - 新增表 `control-plane/sql/004_app_runtime_profiles.sql`（provider/model/timeout/credential_env/provider_options）。
+  - `RbacRepository` 扩展：
+    - `upsertStoreApp(...)`
+    - `getStoreAppRuntimeConfig(appId)`
+  - 新增路由 `POST /api/apps/register`（支持 runtimeDefaults 配置）。
+  - `GET /api/apps/store` 返回 `runtimeDefaults`（仅回传 `credentialEnvKeys`，不回传密钥值）。
+  - `POST /api/runs/start` 当带 `executionProfile` 且命中 app runtime 配置时：
+    - 自动覆盖 provider/model
+    - 合并 runtime providerOptions 与请求 providerOptions
+    - 将 runtime credential env 注入 providerOptions.env
+    - 透传 `timeoutMs`（可被请求侧覆盖）。
+- provider/model 分层超时模板：
+  - 新增 `executor-manager/src/config/provider-timeout-template.ts`。
+  - `executor-manager` 支持 `EXECUTOR_RUN_TIMEOUT_TEMPLATE_JSON`，并按以下优先级解析超时：
+    1. `providerOptions.timeoutMs/runTimeoutMs`
+    2. provider+model 模板命中
+    3. `EXECUTOR_RUN_TIMEOUT_MS` 默认值
+  - `executor-manager` 以 runId 缓存超时策略，stream/stop/reply 复用。
+- 前端联动：
+  - `portal` 读取 store app 的 `runtimeDefaults`，选中 app 时锁定 provider/model 展示，run 配置自动携带 app timeout。
+
+### outputs
+- `scripts/bootstrap-local-provider-env.sh`
+- `docker-compose.yml`
+- `scripts/provider-runtime-health-check.sh`
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `control-plane/sql/004_app_runtime_profiles.sql`
+- `control-plane/src/repositories/rbac-repository.ts`
+- `control-plane/src/repositories/in-memory-rbac-repository.ts`
+- `control-plane/src/repositories/postgres-rbac-repository.ts`
+- `control-plane/src/routes/apps.ts`
+- `control-plane/src/routes/runs.ts`
+- `control-plane/test/e2e/apps-files-rbac.e2e.test.ts`
+- `executor-manager/src/config/provider-timeout-template.ts`
+- `executor-manager/src/routes/provider-runs.ts`
+- `executor-manager/src/app.ts`
+- `portal/src/App.tsx`
+- `portal/src/workbench/use-run-chat.ts`
+
+### validation
+- commands:
+  - `bash scripts/pre-commit-check.sh`
+  - `cd control-plane && npm run test`
+  - `PROVIDER_ENV_INJECT_EXECUTOR=1 bash scripts/bootstrap-local-provider-env.sh`
+  - `PROVIDER_HEALTH_PROVIDER=claude-code bash scripts/provider-runtime-health-check.sh`
+  - `PROVIDER_HEALTH_PROVIDER=opencode bash scripts/provider-runtime-health-check.sh`
+  - `STRESS_SKIP_COMPOSE_UP=1 STRESS_ITERATIONS=1 STRESS_PROVIDER=claude-code STRESS_MODEL=sonnet STRESS_RUN_TIMEOUT_SEC=240 STRESS_PRECHECK_TIMEOUT_SEC=120 STRESS_STRICT=0 bash scripts/e2e-portal-real-provider-stress.sh`
+  - `STRESS_SKIP_COMPOSE_UP=1 STRESS_ITERATIONS=1 STRESS_PROVIDER=opencode STRESS_MODEL=r2ai/deepseek-v3.2 STRESS_RUN_TIMEOUT_SEC=240 STRESS_PRECHECK_TIMEOUT_SEC=120 STRESS_STRICT=0 bash scripts/e2e-portal-real-provider-stress.sh`
+- results:
+  - lint/typecheck 全量通过，control-plane 全量测试通过。
+  - `claude-code` 进入真实链路但返回 403（令牌无模型权限），报告：
+    - `observability/reports/phase21-provider-stress-20260213-131903.json`
+  - `opencode` 进入真实链路但终态 `canceled`（上游未返回可诊断 reason），报告：
+    - `observability/reports/phase21-provider-stress-20260213-131920.json`
+
+### gate_result
+- **Pass（平台能力）**：凭据注入、app runtime 注册、分层超时模板与联调链路全部打通。
+- **Fail（provider 可用性）**：`claude-code/opencode` 在当前本机凭据下仍未得到成功样本。
+
+### risks
+- `claude-code` 凭据可鉴权但无目标模型权限，需更换可用模型或提升 token 权限。
+- `opencode` 终态 `canceled` 仍无 reason，需进一步向上游 SDK/CLI 提取取消原因并映射错误分类。
+
+### next_phase
+- Phase 27：继续收敛真实 provider 可用性问题（模型可用矩阵 + `canceled` reason 透传），补齐 `unknown_failure` 分类缺口。

@@ -43,13 +43,19 @@ wait_for_postgres() {
 }
 
 apply_db_migrations() {
-  log "apply database migrations (001/002/003)"
+  log "apply database migrations (001/002/003/004)"
   docker exec pgsql psql -U app -d app -v ON_ERROR_STOP=1 \
     -f /docker-entrypoint-initdb.d/001_init.sql >/dev/null
   docker exec pgsql psql -U app -d app -v ON_ERROR_STOP=1 \
     -f /docker-entrypoint-initdb.d/002_rbac_and_file_acl.sql >/dev/null
   docker exec pgsql psql -U app -d app -v ON_ERROR_STOP=1 \
     -f /docker-entrypoint-initdb.d/003_chat_history.sql >/dev/null
+  if docker exec pgsql sh -lc '[ -f /docker-entrypoint-initdb.d/004_app_runtime_profiles.sql ]' >/dev/null 2>&1; then
+    docker exec pgsql psql -U app -d app -v ON_ERROR_STOP=1 \
+      -f /docker-entrypoint-initdb.d/004_app_runtime_profiles.sql >/dev/null
+  else
+    cat control-plane/sql/004_app_runtime_profiles.sql | docker exec -i pgsql psql -U app -d app -v ON_ERROR_STOP=1 >/dev/null
+  fi
 }
 
 COMPOSE_SERVICES=(
@@ -74,6 +80,8 @@ PRECHECK_ENABLED="${STRESS_PRECHECK_ENABLED:-1}"
 AUTO_FALLBACK_SCRIPTED="${STRESS_AUTO_FALLBACK_SCRIPTED:-0}"
 FALLBACK_RUN_TIMEOUT_SEC="${STRESS_FALLBACK_TIMEOUT_SEC:-45}"
 PROVIDER_RUNTIME_CONTAINER="${STRESS_PROVIDER_RUNTIME_CONTAINER:-executor}"
+BOOTSTRAP_LOCAL_PROVIDER_ENV="${STRESS_BOOTSTRAP_LOCAL_PROVIDER_ENV:-0}"
+LOCAL_PROVIDER_ENV_FILE="${STRESS_LOCAL_PROVIDER_ENV_FILE:-.tmp/provider-local.env}"
 ARCHIVE_ENABLED="${STRESS_ARCHIVE_ENABLED:-1}"
 ARCHIVE_MAX_FAILURES="${STRESS_ARCHIVE_MAX_FAILURES:-3}"
 ARCHIVE_LOG_SERVICES="${STRESS_ARCHIVE_LOG_SERVICES:-gateway control-plane executor-manager executor}"
@@ -81,6 +89,7 @@ ARCHIVE_LOG_TAIL="${STRESS_ARCHIVE_LOG_TAIL:-250}"
 REPORT_DIR="${STRESS_REPORT_DIR:-observability/reports}"
 SUMMARY_OUT="${STRESS_SUMMARY_OUT:-}"
 SKIP_COMPOSE_UP="${STRESS_SKIP_COMPOSE_UP:-0}"
+COMPOSE_ENV_FILE=""
 
 mkdir -p "$REPORT_DIR"
 report_path="${REPORT_DIR}/phase21-provider-stress-$(date +%Y%m%d-%H%M%S).json"
@@ -101,6 +110,28 @@ cleanup() {
     "$last_sse_payload_file" "$last_curl_error_file"
 }
 trap cleanup EXIT
+
+prepare_local_provider_env() {
+  if [[ "$BOOTSTRAP_LOCAL_PROVIDER_ENV" != "1" ]]; then
+    return 0
+  fi
+
+  log "bootstrap local provider env from ~/.claude/settings.json and ~/.config/opencode/opencode.json"
+  local inject_executor="0"
+  if [[ "$SKIP_COMPOSE_UP" == "1" ]]; then
+    inject_executor="1"
+  fi
+
+  PROVIDER_ENV_OUT="$LOCAL_PROVIDER_ENV_FILE" PROVIDER_ENV_INJECT_EXECUTOR="$inject_executor" \
+    bash scripts/bootstrap-local-provider-env.sh
+
+  if [[ -s "$LOCAL_PROVIDER_ENV_FILE" ]]; then
+    COMPOSE_ENV_FILE="$LOCAL_PROVIDER_ENV_FILE"
+    log "local provider env ready: ${COMPOSE_ENV_FILE}"
+  else
+    log "local provider env file is empty: ${LOCAL_PROVIDER_ENV_FILE}"
+  fi
+}
 
 record_runtime_check() {
   local name="$1"
@@ -210,7 +241,7 @@ check_provider_runtime() {
   local cli_name=""
   local auth_check_cmd=""
   local auth_hint=""
-  local auth_env_name=""
+  local auth_env_names=""
 
   case "$PROVIDER" in
     codex-cli|codex-app-server)
@@ -221,21 +252,21 @@ check_provider_runtime() {
       ;;
     claude-code)
       cli_name="claude"
-      auth_check_cmd='[ -f /root/.claude.json ] || [ -d /root/.config/claude ]'
-      auth_hint="check /root/.claude.json or /root/.config/claude"
-      auth_env_name="ANTHROPIC_API_KEY"
+      auth_check_cmd='[ -f /root/.claude/settings.json ] || [ -f /root/.claude.json ] || [ -d /root/.config/claude ]'
+      auth_hint="check /root/.claude/settings.json or /root/.claude.json or /root/.config/claude"
+      auth_env_names="ANTHROPIC_AUTH_TOKEN,ANTHROPIC_API_KEY"
       ;;
     opencode)
       cli_name="opencode"
-      auth_check_cmd=''
-      auth_hint="no explicit auth file check configured"
-      auth_env_name="OPENAI_API_KEY"
+      auth_check_cmd='[ -f /root/.config/opencode/opencode.json ] || [ -f /root/.config/opencode/config.json ]'
+      auth_hint="check /root/.config/opencode/opencode.json or /root/.config/opencode/config.json"
+      auth_env_names="OPENCODE_R2AI_API_KEY,OPENAI_API_KEY"
       ;;
     *)
       cli_name="$PROVIDER"
       auth_check_cmd=''
       auth_hint="unknown provider; skip auth file check"
-      auth_env_name=""
+      auth_env_names=""
       ;;
   esac
 
@@ -269,12 +300,17 @@ check_provider_runtime() {
   fi
 
   auth_env_ok="0"
-  if [[ -n "$auth_env_name" ]]; then
-    if docker exec "$PROVIDER_RUNTIME_CONTAINER" sh -lc "[ -n \"\${${auth_env_name}:-}\" ]" >/dev/null 2>&1; then
-      auth_env_ok="1"
-      record_runtime_check "provider_auth_env" "pass" "${auth_env_name} present in ${PROVIDER_RUNTIME_CONTAINER}"
-    else
-      record_runtime_check "provider_auth_env" "warn" "${auth_env_name} missing in ${PROVIDER_RUNTIME_CONTAINER}"
+  if [[ -n "$auth_env_names" ]]; then
+    IFS=',' read -r -a auth_env_name_list <<<"$auth_env_names"
+    for env_name in "${auth_env_name_list[@]}"; do
+      if docker exec "$PROVIDER_RUNTIME_CONTAINER" sh -lc "[ -n \"\${${env_name}:-}\" ]" >/dev/null 2>&1; then
+        auth_env_ok="1"
+        record_runtime_check "provider_auth_env" "pass" "${env_name} present in ${PROVIDER_RUNTIME_CONTAINER}"
+        break
+      fi
+    done
+    if [[ "$auth_env_ok" != "1" ]]; then
+      record_runtime_check "provider_auth_env" "warn" "none of [${auth_env_names}] present in ${PROVIDER_RUNTIME_CONTAINER}"
     fi
   else
     record_runtime_check "provider_auth_env" "warn" "no auth env check configured for provider ${PROVIDER}"
@@ -585,7 +621,11 @@ JSON
 
 run_scripted_fallback_probe() {
   log "fallback probe: switch control-plane to scripted mode"
-  CONTROL_PLANE_PROVIDER_MODE=scripted docker compose up -d --build control-plane gateway >/dev/null
+  if [[ -n "$COMPOSE_ENV_FILE" ]]; then
+    CONTROL_PLANE_PROVIDER_MODE=scripted docker compose --env-file "$COMPOSE_ENV_FILE" up -d --build control-plane gateway >/dev/null
+  else
+    CONTROL_PLANE_PROVIDER_MODE=scripted docker compose up -d --build control-plane gateway >/dev/null
+  fi
   wait_for_health "gateway(scripted)" "http://127.0.0.1:3001/health" 60 2
 
   local fallback_run_id
@@ -607,13 +647,23 @@ run_scripted_fallback_probe() {
   fi
 
   log "restore control-plane to real mode"
-  CONTROL_PLANE_PROVIDER_MODE=real docker compose up -d --build control-plane gateway >/dev/null
+  if [[ -n "$COMPOSE_ENV_FILE" ]]; then
+    CONTROL_PLANE_PROVIDER_MODE=real docker compose --env-file "$COMPOSE_ENV_FILE" up -d --build control-plane gateway >/dev/null
+  else
+    CONTROL_PLANE_PROVIDER_MODE=real docker compose up -d --build control-plane gateway >/dev/null
+  fi
   wait_for_health "gateway(real-restored)" "http://127.0.0.1:3001/health" 60 2
 }
 
+prepare_local_provider_env
+
 if [[ "$SKIP_COMPOSE_UP" != "1" ]]; then
   log "starting compose services in real provider mode: ${COMPOSE_SERVICES[*]}"
-  CONTROL_PLANE_PROVIDER_MODE=real docker compose up -d --build "${COMPOSE_SERVICES[@]}"
+  if [[ -n "$COMPOSE_ENV_FILE" ]]; then
+    CONTROL_PLANE_PROVIDER_MODE=real docker compose --env-file "$COMPOSE_ENV_FILE" up -d --build "${COMPOSE_SERVICES[@]}"
+  else
+    CONTROL_PLANE_PROVIDER_MODE=real docker compose up -d --build "${COMPOSE_SERVICES[@]}"
+  fi
 else
   log "skip compose startup because STRESS_SKIP_COMPOSE_UP=1"
 fi

@@ -458,5 +458,9 @@
 14. Phase 21（进行中）
 
 ## 当前阶段
-- `in_progress`: Phase 25（真实 Provider 凭据治理与超时基线收敛）
-- `next_commit`: `fix(phase-21): harden provider readiness gate and timeout baseline in CI/stress`
+- `in_progress`: Phase 26（本地凭据注入产品化 + app runtime 注册 + provider/model 分层超时模板）
+- `next_commit`: `feat(phase-26): productize local provider env injection and app runtime defaults with layered timeout templates`
+
+## Phase 26 实质未完成
+- [ ] `claude-code` 真实成功样本：当前 token 返回 403（模型无权限），需补可用模型/权限矩阵。
+- [ ] `opencode` 终态 `canceled` 原因透传：当前 executor 仅收到 `status=canceled, reason=null`，需继续下钻 SDK/CLI 原始原因并映射到 failureClass。

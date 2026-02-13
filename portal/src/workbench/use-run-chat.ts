@@ -42,6 +42,12 @@ type UiRunStatus =
 interface ActiveStoreApp {
   readonly appId: string;
   readonly name: string;
+  readonly runtimeDefaults: {
+    readonly provider: ProviderKind;
+    readonly model: string;
+    readonly timeoutMs: number | null;
+    readonly credentialEnvKeys: readonly string[];
+  } | null;
 }
 
 export interface RunChatController {
@@ -169,10 +175,19 @@ export function useRunChat(input: {
       requireHumanLoop,
     };
     if (activeStoreApp) {
+      const providerOptions: Record<string, unknown> = {
+        storeAppId: activeStoreApp.appId,
+      };
+      if (
+        activeStoreApp.runtimeDefaults &&
+        typeof activeStoreApp.runtimeDefaults.timeoutMs === "number"
+      ) {
+        providerOptions.timeoutMs = activeStoreApp.runtimeDefaults.timeoutMs;
+      }
       runConfigRef.current = {
         ...baseConfig,
         executionProfile: activeStoreApp.appId,
-        providerOptions: { storeAppId: activeStoreApp.appId },
+        providerOptions,
       };
       return;
     }

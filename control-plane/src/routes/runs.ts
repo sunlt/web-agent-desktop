@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import type { RunCallbackRepository } from "../repositories/run-callback-repository.js";
+import type { RbacRepository } from "../repositories/rbac-repository.js";
 import type {
   RunOrchestrator,
   RunOrchestratorEvent,
@@ -77,6 +78,7 @@ const restorePlanSchema = z.object({
 export function createRunsRouter(input: {
   orchestrator: RunOrchestrator;
   callbackRepo?: RunCallbackRepository;
+  rbacRepository?: RbacRepository;
 }): Router {
   const router = Router();
   const streamBus = new StreamBus<RunOrchestratorEvent>(2000);
@@ -127,9 +129,14 @@ export function createRunsRouter(input: {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
+    const runInput = await resolveRunInputWithAppRuntime({
+      body: parsed.data,
+      rbacRepository: input.rbacRepository,
+    });
+
     const sseRequested = wantsSse(req.headers.accept);
     if (sseRequested) {
-      const started = await input.orchestrator.startRun(parsed.data);
+      const started = await input.orchestrator.startRun(runInput);
       if (!started.accepted) {
         return res.status(409).json(started);
       }
@@ -142,7 +149,7 @@ export function createRunsRouter(input: {
       });
     }
 
-    const started = await input.orchestrator.startRun(parsed.data);
+    const started = await input.orchestrator.startRun(runInput);
 
     if (!started.accepted) {
       return res.status(409).json(started);
@@ -321,4 +328,100 @@ function parseAfterSeq(req: Request): number {
     return 0;
   }
   return parsed;
+}
+
+type StartRunRequestBody = z.infer<typeof startRunSchema>;
+
+async function resolveRunInputWithAppRuntime(input: {
+  body: StartRunRequestBody;
+  rbacRepository?: RbacRepository;
+}): Promise<StartRunRequestBody> {
+  const { body, rbacRepository } = input;
+  const appId = body.executionProfile?.trim();
+  if (!appId || !rbacRepository) {
+    return body;
+  }
+
+  const runtimeConfig = await rbacRepository.getStoreAppRuntimeConfig(appId);
+  if (!runtimeConfig) {
+    return body;
+  }
+
+  const runtimeProviderOptions = asUnknownRecord(runtimeConfig.providerOptions);
+  const runtimeEnv = {
+    ...asStringRecord(runtimeProviderOptions["env"]),
+    ...runtimeConfig.credentialEnv,
+  };
+  const runtimeTimeoutMs = runtimeConfig.timeoutMs;
+
+  const runtimeDefaults: Record<string, unknown> = {
+    ...runtimeProviderOptions,
+  };
+  if (Object.keys(runtimeEnv).length > 0) {
+    runtimeDefaults["env"] = runtimeEnv;
+  }
+  if (runtimeTimeoutMs && runtimeDefaults["timeoutMs"] === undefined) {
+    runtimeDefaults["timeoutMs"] = runtimeTimeoutMs;
+  }
+
+  const mergedProviderOptions = mergeProviderOptions(
+    runtimeDefaults,
+    body.providerOptions,
+  );
+
+  return {
+    ...body,
+    provider: runtimeConfig.provider,
+    model: runtimeConfig.model,
+    providerOptions: mergedProviderOptions,
+  };
+}
+
+function mergeProviderOptions(
+  base: Record<string, unknown>,
+  override: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const overrideRecord = asUnknownRecord(override);
+  const merged: Record<string, unknown> = {
+    ...base,
+    ...overrideRecord,
+  };
+
+  const mergedEnv = {
+    ...asStringRecord(base["env"]),
+    ...asStringRecord(overrideRecord["env"]),
+  };
+  if (Object.keys(mergedEnv).length > 0) {
+    merged["env"] = mergedEnv;
+  } else {
+    delete merged["env"];
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function asUnknownRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return { ...(value as Record<string, unknown>) };
+}
+
+function asStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const output: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const normalizedKey = key.trim();
+    const normalizedValue = item.trim();
+    if (!normalizedKey || !normalizedValue) {
+      continue;
+    }
+    output[normalizedKey] = normalizedValue;
+  }
+  return output;
 }

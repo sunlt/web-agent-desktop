@@ -1,6 +1,10 @@
 import { Readable } from "node:stream";
 import { Router, type Request, type Response as ExpressResponse } from "express";
 import { z } from "zod";
+import type {
+  ProviderTimeoutTemplate,
+} from "../config/provider-timeout-template.js";
+import { resolveRunTimeoutMs } from "../config/provider-timeout-template.js";
 
 const chatMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant"]),
@@ -36,7 +40,10 @@ const FORWARDED_TRACE_HEADERS = [
 export interface CreateProviderRunsRouterOptions {
   readonly executorBaseUrl: string;
   readonly executorToken?: string;
-  readonly timeoutMs: number;
+  readonly defaultTimeoutMs?: number;
+  readonly timeoutMs?: number;
+  readonly timeoutTemplate?: ProviderTimeoutTemplate;
+  readonly maxTrackedRuns?: number;
 }
 
 export function createProviderRunsRouter(
@@ -44,6 +51,17 @@ export function createProviderRunsRouter(
 ): Router {
   const router = Router();
   const baseUrl = options.executorBaseUrl.replace(/\/+$/, "");
+  const defaultTimeoutMs = normalizeTimeoutMs(
+    options.defaultTimeoutMs ?? options.timeoutMs,
+    1_800_000,
+  );
+  const timeoutTemplate = options.timeoutTemplate ?? {};
+  const maxTrackedRuns = Math.max(
+    200,
+    normalizeTimeoutMs(options.maxTrackedRuns, 2_000),
+  );
+  const runTimeoutById = new Map<string, number>();
+  const runOrder: string[] = [];
 
   router.post("/provider-runs/start", async (req, res) => {
     const parsed = startRunSchema.safeParse(req.body);
@@ -51,11 +69,26 @@ export function createProviderRunsRouter(
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
+    const runTimeoutMs = resolveRunTimeoutMs({
+      provider: parsed.data.provider,
+      model: parsed.data.model,
+      providerOptions: parsed.data.providerOptions,
+      fallbackTimeoutMs: defaultTimeoutMs,
+      template: timeoutTemplate,
+    });
+    rememberRunTimeout({
+      runId: parsed.data.runId,
+      timeoutMs: runTimeoutMs,
+      runTimeoutById,
+      runOrder,
+      maxTrackedRuns,
+    });
+
     return proxyJsonRequest({
       req,
       res,
       method: "POST",
-      timeoutMs: options.timeoutMs,
+      timeoutMs: runTimeoutMs,
       url: `${baseUrl}/provider-runs/start`,
       body: parsed.data,
       token: options.executorToken,
@@ -77,7 +110,7 @@ export function createProviderRunsRouter(
     return proxySseRequest({
       req,
       res,
-      timeoutMs: options.timeoutMs,
+      timeoutMs: runTimeoutById.get(runId) ?? defaultTimeoutMs,
       url,
       token: options.executorToken,
     });
@@ -85,15 +118,17 @@ export function createProviderRunsRouter(
 
   router.post("/provider-runs/:runId/stop", async (req, res) => {
     const runId = req.params.runId;
-    return proxyJsonRequest({
+    const response = await proxyJsonRequest({
       req,
       res,
       method: "POST",
-      timeoutMs: options.timeoutMs,
+      timeoutMs: runTimeoutById.get(runId) ?? defaultTimeoutMs,
       url: `${baseUrl}/provider-runs/${encodeURIComponent(runId)}/stop`,
       body: {},
       token: options.executorToken,
     });
+    runTimeoutById.delete(runId);
+    return response;
   });
 
   router.post("/provider-runs/:runId/human-loop/reply", async (req, res) => {
@@ -107,7 +142,7 @@ export function createProviderRunsRouter(
       req,
       res,
       method: "POST",
-      timeoutMs: options.timeoutMs,
+      timeoutMs: runTimeoutById.get(runId) ?? defaultTimeoutMs,
       url: `${baseUrl}/provider-runs/${encodeURIComponent(runId)}/human-loop/reply`,
       body: parsed.data,
       token: options.executorToken,
@@ -115,6 +150,28 @@ export function createProviderRunsRouter(
   });
 
   return router;
+}
+
+function rememberRunTimeout(input: {
+  runId: string;
+  timeoutMs: number;
+  runTimeoutById: Map<string, number>;
+  runOrder: string[];
+  maxTrackedRuns: number;
+}): void {
+  const { runId, timeoutMs, runTimeoutById, runOrder, maxTrackedRuns } = input;
+  if (!runTimeoutById.has(runId)) {
+    runOrder.push(runId);
+  }
+  runTimeoutById.set(runId, timeoutMs);
+
+  while (runOrder.length > maxTrackedRuns) {
+    const staleRunId = runOrder.shift();
+    if (!staleRunId) {
+      continue;
+    }
+    runTimeoutById.delete(staleRunId);
+  }
 }
 
 async function proxyJsonRequest(input: {
@@ -275,4 +332,11 @@ function copySseHeaders(
   to.setHeader("cache-control", cacheControl);
   to.setHeader("connection", connection);
   to.flushHeaders?.();
+}
+
+function normalizeTimeoutMs(raw: unknown, fallback: number): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+    return fallback;
+  }
+  return Math.floor(raw);
 }

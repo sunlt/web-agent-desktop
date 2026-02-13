@@ -15,6 +15,7 @@ import type { SessionWorkerRepository } from "./repositories/session-worker-repo
 import { createProviderRunsRouter } from "./routes/provider-runs.js";
 import { createSessionWorkersRouter } from "./routes/session-workers.js";
 import { LifecycleManager } from "./services/lifecycle-manager.js";
+import { buildProviderTimeoutTemplate } from "./config/provider-timeout-template.js";
 
 export interface CreateExecutorManagerAppOptions {
   readonly pool?: Pool | null;
@@ -123,12 +124,20 @@ export function createExecutorManagerApp(
   });
 
   if (executorBaseUrl) {
+    const defaultRunTimeoutMs = parseNumber(
+      process.env.EXECUTOR_RUN_TIMEOUT_MS,
+      1_800_000,
+    );
+    const timeoutTemplate = buildProviderTimeoutTemplate(
+      process.env.EXECUTOR_RUN_TIMEOUT_TEMPLATE_JSON,
+    );
     app.use(
       "/api",
       createProviderRunsRouter({
         executorBaseUrl,
         executorToken: process.env.EXECUTOR_AUTH_TOKEN,
-        timeoutMs: parseNumber(process.env.EXECUTOR_RUN_TIMEOUT_MS, 1_800_000),
+        defaultTimeoutMs: defaultRunTimeoutMs,
+        timeoutTemplate,
       }),
     );
   }

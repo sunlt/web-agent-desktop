@@ -137,6 +137,7 @@ export function createControlPlaneApp(
     createRunsRouter({
       orchestrator: runOrchestrator,
       callbackRepo: callbackRepository,
+      rbacRepository,
     }),
   );
   app.use("/api", createRunQueueRouter(runQueueManager));

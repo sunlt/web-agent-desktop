@@ -1,6 +1,9 @@
 import type {
   FileAuditLogInput,
   RbacRepository,
+  RegisterStoreAppInput,
+  StoreAppRuntimeConfig,
+  StoreAppRuntimeDefaultsView,
   StoreAppView,
 } from "./rbac-repository.js";
 
@@ -30,6 +33,15 @@ interface AppMember {
   canUse: boolean;
 }
 
+interface AppRuntimeProfile {
+  appId: string;
+  provider: StoreAppRuntimeConfig["provider"];
+  model: string;
+  timeoutMs: number | null;
+  credentialEnv: Record<string, string>;
+  providerOptions: Record<string, unknown>;
+}
+
 interface FileAclPolicy {
   pathPrefix: string;
   principalType: PrincipalType;
@@ -44,6 +56,7 @@ export class InMemoryRbacRepository implements RbacRepository {
   private readonly apps = new Map<string, AppRecord>();
   private readonly visibilityRules: VisibilityRule[] = [];
   private readonly appMembers: AppMember[] = [];
+  private readonly runtimeProfiles = new Map<string, AppRuntimeProfile>();
   private readonly filePolicies: FileAclPolicy[] = [];
   private readonly auditLogs: FileAuditLogInput[] = [];
 
@@ -86,6 +99,29 @@ export class InMemoryRbacRepository implements RbacRepository {
       userId: input.userId,
       canUse: input.canUse,
     });
+  }
+
+  setAppRuntimeProfile(
+    input: {
+      appId: string;
+      provider: StoreAppRuntimeConfig["provider"];
+      model: string;
+      timeoutMs?: number;
+      credentialEnv?: Record<string, string>;
+      providerOptions?: Record<string, unknown>;
+    },
+  ): void {
+    this.runtimeProfiles.set(
+      input.appId,
+      normalizeRuntimeProfile({
+        appId: input.appId,
+        provider: input.provider,
+        model: input.model,
+        timeoutMs: input.timeoutMs,
+        credentialEnv: input.credentialEnv,
+        providerOptions: input.providerOptions,
+      }),
+    );
   }
 
   addFilePolicy(input: {
@@ -132,8 +168,71 @@ export class InMemoryRbacRepository implements RbacRepository {
           enabled: app.enabled,
           canView,
           canUse,
+          runtimeDefaults: toRuntimeDefaultsView(this.runtimeProfiles.get(app.appId)),
         };
       });
+  }
+
+  async upsertStoreApp(input: RegisterStoreAppInput): Promise<void> {
+    this.addApp({
+      appId: input.appId,
+      name: input.name,
+      enabled: input.enabled,
+    });
+
+    if (input.visibilityRules) {
+      replaceByAppId(
+        this.visibilityRules,
+        input.appId,
+        input.visibilityRules.map((rule) => ({
+          appId: input.appId,
+          scope: rule.scopeType,
+          value: rule.scopeValue,
+        })),
+      );
+    }
+
+    if (input.members) {
+      replaceByAppId(
+        this.appMembers,
+        input.appId,
+        input.members.map((member) => ({
+          appId: input.appId,
+          userId: member.userId,
+          canUse: member.canUse,
+        })),
+      );
+    }
+
+    if (input.runtimeDefaults) {
+      this.runtimeProfiles.set(
+        input.appId,
+        normalizeRuntimeProfile({
+          appId: input.appId,
+          provider: input.runtimeDefaults.provider,
+          model: input.runtimeDefaults.model,
+          timeoutMs: input.runtimeDefaults.timeoutMs,
+          credentialEnv: input.runtimeDefaults.credentialEnv,
+          providerOptions: input.runtimeDefaults.providerOptions,
+        }),
+      );
+    }
+  }
+
+  async getStoreAppRuntimeConfig(appId: string): Promise<StoreAppRuntimeConfig | null> {
+    const profile = this.runtimeProfiles.get(appId);
+    if (!profile) {
+      return null;
+    }
+
+    return {
+      appId: profile.appId,
+      provider: profile.provider,
+      model: profile.model,
+      timeoutMs: profile.timeoutMs,
+      credentialEnv: { ...profile.credentialEnv },
+      providerOptions: { ...profile.providerOptions },
+    };
   }
 
   async canReadPath(userId: string, path: string): Promise<boolean> {
@@ -218,4 +317,86 @@ function normalizePathPrefix(input: string): string {
     return `/${input}`;
   }
   return input;
+}
+
+function normalizeRuntimeProfile(input: {
+  appId: string;
+  provider: StoreAppRuntimeConfig["provider"];
+  model: string;
+  timeoutMs: number | undefined;
+  credentialEnv: Record<string, string> | undefined;
+  providerOptions: Record<string, unknown> | undefined;
+}): AppRuntimeProfile {
+  return {
+    appId: input.appId,
+    provider: input.provider,
+    model: input.model,
+    timeoutMs: normalizeTimeoutMs(input.timeoutMs),
+    credentialEnv: sanitizeStringRecord(input.credentialEnv),
+    providerOptions: sanitizeUnknownRecord(input.providerOptions),
+  };
+}
+
+function normalizeTimeoutMs(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.floor(value);
+}
+
+function sanitizeStringRecord(
+  input: Record<string, string> | undefined,
+): Record<string, string> {
+  if (!input) {
+    return {};
+  }
+
+  const output: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    const normalizedKey = key.trim();
+    const normalizedValue = String(value).trim();
+    if (!normalizedKey || !normalizedValue) {
+      continue;
+    }
+    output[normalizedKey] = normalizedValue;
+  }
+  return output;
+}
+
+function sanitizeUnknownRecord(
+  input: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!input) {
+    return {};
+  }
+  return { ...input };
+}
+
+function toRuntimeDefaultsView(
+  profile: AppRuntimeProfile | undefined,
+): StoreAppRuntimeDefaultsView | null {
+  if (!profile) {
+    return null;
+  }
+  return {
+    provider: profile.provider,
+    model: profile.model,
+    timeoutMs: profile.timeoutMs,
+    credentialEnvKeys: Object.keys(profile.credentialEnv).sort((a, b) =>
+      a.localeCompare(b),
+    ),
+  };
+}
+
+function replaceByAppId<T extends { appId: string }>(
+  source: T[],
+  appId: string,
+  next: readonly T[],
+): void {
+  for (let index = source.length - 1; index >= 0; index -= 1) {
+    if (source[index]?.appId === appId) {
+      source.splice(index, 1);
+    }
+  }
+  source.push(...next);
 }

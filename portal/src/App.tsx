@@ -17,6 +17,12 @@ type StoreAppItem = {
   enabled: boolean;
   canView: boolean;
   canUse: boolean;
+  runtimeDefaults: {
+    provider: ProviderKind;
+    model: string;
+    timeoutMs: number | null;
+    credentialEnvKeys: string[];
+  } | null;
 };
 
 type StoreStatus = "idle" | "loading" | "error";
@@ -45,14 +51,28 @@ export default function App() {
   const [storeError, setStoreError] = useState<string>("");
   const [activeAppId, setActiveAppId] = useState<string>("");
 
-  useEffect(() => {
-    setModel(DEFAULT_MODEL[provider]);
-  }, [provider]);
-
   const activeStoreApp = useMemo(
     () => storeApps.find((item) => item.appId === activeAppId) ?? null,
     [activeAppId, storeApps],
   );
+
+  useEffect(() => {
+    const runtimeDefaults = activeStoreApp?.runtimeDefaults;
+    if (runtimeDefaults && runtimeDefaults.provider === provider) {
+      setModel(runtimeDefaults.model);
+      return;
+    }
+    setModel(DEFAULT_MODEL[provider]);
+  }, [activeStoreApp?.runtimeDefaults, provider]);
+
+  useEffect(() => {
+    const runtimeDefaults = activeStoreApp?.runtimeDefaults;
+    if (!runtimeDefaults) {
+      return;
+    }
+    setProvider(runtimeDefaults.provider);
+    setModel(runtimeDefaults.model);
+  }, [activeStoreApp?.appId, activeStoreApp?.runtimeDefaults]);
 
   const runChat = useRunChat({
     apiBase: API_BASE,
@@ -173,7 +193,7 @@ export default function App() {
           <select
             value={provider}
             onChange={(event) => setProvider(event.target.value as ProviderKind)}
-            disabled={runChat.runStatus === "running"}
+            disabled={runChat.runStatus === "running" || Boolean(activeStoreApp?.runtimeDefaults)}
           >
             <option value="codex-app-server">codex-app-server</option>
             <option value="codex-cli">codex-cli</option>
@@ -187,7 +207,7 @@ export default function App() {
           <input
             value={model}
             onChange={(event) => setModel(event.target.value)}
-            disabled={runChat.runStatus === "running"}
+            disabled={runChat.runStatus === "running" || Boolean(activeStoreApp?.runtimeDefaults)}
             placeholder="输入模型 ID"
           />
         </label>
@@ -364,9 +384,20 @@ export default function App() {
               )}
             </div>
             {activeStoreApp ? (
-              <p className="muted">
-                新会话默认绑定应用：<code>{activeStoreApp.appId}</code>
-              </p>
+              <>
+                <p className="muted">
+                  新会话默认绑定应用：<code>{activeStoreApp.appId}</code>
+                </p>
+                {activeStoreApp.runtimeDefaults ? (
+                  <p className="muted">
+                    已锁定 provider/model：
+                    <code>
+                      {activeStoreApp.runtimeDefaults.provider} /{" "}
+                      {activeStoreApp.runtimeDefaults.model}
+                    </code>
+                  </p>
+                ) : null}
+              </>
             ) : null}
           </section>
 

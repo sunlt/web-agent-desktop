@@ -155,6 +155,35 @@
 - stress 脚本正确记录 `curlExit`，超时归类为 `timeout`（不再误报 `unknown_failure`）。
 - 实测本机凭据（`~/.codex/auth.json` 注入 executor）下，长超时窗口可得到 `succeeded` 样本。
 
+### Phase I：本地凭据注入产品化与 App Runtime 策略化
+
+目标：将本机凭据接入从“手工临时注入”升级为可复用能力，并支持在 app 注册时声明 provider/model/credential env/timeout，打通到运行链路。
+
+范围：
+- `scripts/bootstrap-local-provider-env.sh`
+- `docker-compose.yml`
+- `scripts/provider-runtime-health-check.sh`
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `control-plane/sql/004_app_runtime_profiles.sql`
+- `control-plane/src/repositories/rbac-repository.ts`
+- `control-plane/src/repositories/in-memory-rbac-repository.ts`
+- `control-plane/src/repositories/postgres-rbac-repository.ts`
+- `control-plane/src/routes/apps.ts`
+- `control-plane/src/routes/runs.ts`
+- `executor-manager/src/config/provider-timeout-template.ts`
+- `executor-manager/src/routes/provider-runs.ts`
+- `portal/src/App.tsx`
+- `portal/src/workbench/use-run-chat.ts`
+
+验收：
+- 可从 `~/.claude/settings.json` 与 `~/.config/opencode/opencode.json` 自动抽取凭据并注入 `executor` 环境变量。
+- `POST /api/apps/register` 可配置 runtimeDefaults（provider/model/credential env/providerOptions/timeout）。
+- 绑定 `executionProfile` 启动 run 时，app runtimeDefaults 可覆盖 provider/model 并合并注入 env。
+- executor-manager 超时策略支持：
+  - `providerOptions.timeoutMs/runTimeoutMs` 显式覆盖；
+  - provider/model 模板；
+  - 默认 `EXECUTOR_RUN_TIMEOUT_MS` 回退。
+
 ## 4. 兼容与回滚策略
 
 1. 保留 `CONTROL_PLANE_PROVIDER_MODE=scripted` 作为测试与回滚保底。
@@ -176,4 +205,5 @@
 - Phase E：已完成（commit: `e4ece48`）
 - Phase F：已完成（commit: `958ff43`）
 - Phase G：已完成（commit: `55a28ce`）
-- Phase H：进行中（本次提交）
+- Phase H：已完成（commit: `4f1f8c2`）
+- Phase I：进行中（本次提交，剩余真实 provider 可用性收敛）
