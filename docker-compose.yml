@@ -8,7 +8,7 @@ services:
     environment:
       - PORT=3000
       - CONTROL_PLANE_STORAGE=postgres
-      - CONTROL_PLANE_DOCKER=cli
+      - CONTROL_PLANE_DOCKER=none
       - CONTROL_PLANE_ENABLE_SESSION_WORKERS_ROUTER=0
       - CONTROL_PLANE_PROVIDER_MODE=${CONTROL_PLANE_PROVIDER_MODE:-real}
       - EXECUTOR_MANAGER_BASE_URL=http://executor-manager:3010
@@ -17,11 +17,9 @@ services:
       - PGUSER=app
       - PGPASSWORD=app123456
       - PGDATABASE=app
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - pgsql
-      - executor
+      - executor-manager
     networks:
       - agent-network
     restart: always

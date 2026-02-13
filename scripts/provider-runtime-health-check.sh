@@ -8,6 +8,7 @@ PROVIDER="${PROVIDER_HEALTH_PROVIDER:-codex-cli}"
 RUNTIME_CONTAINER="${PROVIDER_HEALTH_RUNTIME_CONTAINER:-executor}"
 CONTROL_PLANE_CONTAINER="${PROVIDER_HEALTH_CONTROL_PLANE_CONTAINER:-control-plane}"
 EXECUTOR_MANAGER_CONTAINER="${PROVIDER_HEALTH_EXECUTOR_MANAGER_CONTAINER:-executor-manager}"
+EXECUTOR_MANAGER_HEALTH_URL="${PROVIDER_HEALTH_EXECUTOR_MANAGER_URL:-http://127.0.0.1:3010/health}"
 OUT_PATH="${PROVIDER_HEALTH_OUT:-}"
 STRICT_MODE="${PROVIDER_HEALTH_STRICT:-0}"
 
@@ -44,6 +45,14 @@ if docker inspect "$EXECUTOR_MANAGER_CONTAINER" >/dev/null 2>&1; then
   record_check "executor_manager_container" "pass" "container exists: ${EXECUTOR_MANAGER_CONTAINER}"
 else
   record_check "executor_manager_container" "fail" "container not found: ${EXECUTOR_MANAGER_CONTAINER}"
+fi
+
+if [[ -n "$EXECUTOR_MANAGER_HEALTH_URL" ]]; then
+  if curl -fsS "$EXECUTOR_MANAGER_HEALTH_URL" >/dev/null 2>&1; then
+    record_check "executor_manager_health" "pass" "health endpoint reachable: ${EXECUTOR_MANAGER_HEALTH_URL}"
+  else
+    record_check "executor_manager_health" "fail" "health endpoint unreachable: ${EXECUTOR_MANAGER_HEALTH_URL}"
+  fi
 fi
 
 cli_name=""
@@ -129,7 +138,7 @@ else
   record_check "provider_auth_ready" "fail" "runtime missing"
 fi
 
-report="$(CHECKS_FILE="$checks_tmp" PROVIDER="$PROVIDER" RUNTIME_CONTAINER="$RUNTIME_CONTAINER" CONTROL_PLANE_CONTAINER="$CONTROL_PLANE_CONTAINER" EXECUTOR_MANAGER_CONTAINER="$EXECUTOR_MANAGER_CONTAINER" node -e '
+report="$(CHECKS_FILE="$checks_tmp" PROVIDER="$PROVIDER" RUNTIME_CONTAINER="$RUNTIME_CONTAINER" CONTROL_PLANE_CONTAINER="$CONTROL_PLANE_CONTAINER" EXECUTOR_MANAGER_CONTAINER="$EXECUTOR_MANAGER_CONTAINER" EXECUTOR_MANAGER_HEALTH_URL="$EXECUTOR_MANAGER_HEALTH_URL" node -e '
   const fs = require("node:fs");
   const checks = fs
     .readFileSync(process.env.CHECKS_FILE, "utf8")
@@ -145,6 +154,7 @@ report="$(CHECKS_FILE="$checks_tmp" PROVIDER="$PROVIDER" RUNTIME_CONTAINER="$RUN
     runtimeContainer: process.env.RUNTIME_CONTAINER,
     controlPlaneContainer: process.env.CONTROL_PLANE_CONTAINER,
     executorManagerContainer: process.env.EXECUTOR_MANAGER_CONTAINER,
+    executorManagerHealthUrl: process.env.EXECUTOR_MANAGER_HEALTH_URL,
     ready: failed.length === 0,
     failedChecks: failed.map((item) => item.name),
     warnedChecks: warned.map((item) => item.name),
