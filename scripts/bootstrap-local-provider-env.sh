@@ -7,17 +7,20 @@ cd "$ROOT_DIR"
 PROVIDER_ENV_OUT="${PROVIDER_ENV_OUT:-$ROOT_DIR/.tmp/provider-local.env}"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_PATH:-$HOME/.claude/settings.json}"
 OPENCODE_CONFIG_PATH="${OPENCODE_CONFIG_PATH:-$HOME/.config/opencode/opencode.json}"
+CODEX_AUTH_PATH="${CODEX_AUTH_PATH:-$HOME/.codex/auth.json}"
 INJECT_EXECUTOR="${PROVIDER_ENV_INJECT_EXECUTOR:-0}"
 EXECUTOR_SERVICE="${PROVIDER_ENV_EXECUTOR_SERVICE:-executor}"
+SYNC_AUTH_FILES="${PROVIDER_ENV_SYNC_AUTH_FILES:-1}"
 
 mkdir -p "$(dirname "$PROVIDER_ENV_OUT")"
 
 env_payload="$(
-  CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" OPENCODE_CONFIG_PATH="$OPENCODE_CONFIG_PATH" node -e '
+  CLAUDE_SETTINGS_PATH="$CLAUDE_SETTINGS_PATH" OPENCODE_CONFIG_PATH="$OPENCODE_CONFIG_PATH" CODEX_AUTH_PATH="$CODEX_AUTH_PATH" node -e '
     const fs = require("node:fs");
 
     const claudePath = process.env.CLAUDE_SETTINGS_PATH;
     const opencodePath = process.env.OPENCODE_CONFIG_PATH;
+    const codexAuthPath = process.env.CODEX_AUTH_PATH;
     const env = {};
     const sources = [];
 
@@ -92,6 +95,25 @@ env_payload="$(
       sources.push("opencode_config_missing");
     }
 
+    if (codexAuthPath && fs.existsSync(codexAuthPath)) {
+      try {
+        const codexAuth = JSON.parse(fs.readFileSync(codexAuthPath, "utf8"));
+        if (isRecord(codexAuth)) {
+          if (typeof codexAuth.OPENAI_API_KEY === "string") {
+            setEnv("OPENAI_API_KEY", codexAuth.OPENAI_API_KEY);
+          }
+          if (typeof codexAuth.OPENAI_BASE_URL === "string") {
+            setEnv("OPENAI_BASE_URL", codexAuth.OPENAI_BASE_URL);
+          }
+          sources.push("codex_auth");
+        }
+      } catch {
+        sources.push("codex_auth_invalid_json");
+      }
+    } else {
+      sources.push("codex_auth_missing");
+    }
+
     const orderedKeys = Object.keys(env).sort((a, b) => a.localeCompare(b));
     const lines = orderedKeys.map((key) => `${key}=${env[key]}`);
     process.stdout.write(JSON.stringify({ lines, orderedKeys, sources }));
@@ -125,4 +147,14 @@ if [[ "$INJECT_EXECUTOR" == "1" ]]; then
   fi
   echo "[provider-env] recreating ${EXECUTOR_SERVICE} with ${PROVIDER_ENV_OUT}"
   docker compose --env-file "$PROVIDER_ENV_OUT" up -d --force-recreate "$EXECUTOR_SERVICE"
+
+  if [[ "$SYNC_AUTH_FILES" == "1" ]]; then
+    if [[ -f "$CODEX_AUTH_PATH" ]]; then
+      echo "[provider-env] syncing codex auth file into ${EXECUTOR_SERVICE}:/root/.codex/auth.json"
+      docker exec "$EXECUTOR_SERVICE" sh -lc 'mkdir -p /root/.codex'
+      docker cp "$CODEX_AUTH_PATH" "${EXECUTOR_SERVICE}:/root/.codex/auth.json"
+    else
+      echo "[provider-env] codex auth file missing, skip sync: ${CODEX_AUTH_PATH}"
+    fi
+  fi
 fi
