@@ -156,5 +156,13 @@ if [[ "$INJECT_EXECUTOR" == "1" ]]; then
     else
       echo "[provider-env] codex auth file missing, skip sync: ${CODEX_AUTH_PATH}"
     fi
+
+    if [[ -f "$OPENCODE_CONFIG_PATH" ]]; then
+      echo "[provider-env] syncing opencode config file into ${EXECUTOR_SERVICE}:/root/.config/opencode/opencode.json"
+      docker exec "$EXECUTOR_SERVICE" sh -lc 'mkdir -p /root/.config/opencode'
+      docker cp "$OPENCODE_CONFIG_PATH" "${EXECUTOR_SERVICE}:/root/.config/opencode/opencode.json"
+    else
+      echo "[provider-env] opencode config file missing, skip sync: ${OPENCODE_CONFIG_PATH}"
+    fi
   fi
 fi
