@@ -396,6 +396,36 @@
 
 ---
 
+## Phase 21: 真实 Provider 压测基线与 Flaky 收敛（进行中）
+**Type**: Reliability + Observability
+**Estimated**: 4~8 小时
+**目标**: 在 `CONTROL_PLANE_PROVIDER_MODE=real` 下建立可重复执行的 provider 压测基线，量化成功率与失败细节，为后续 flaky 收敛提供数据支撑。
+
+**范围文件**:
+- `.gitignore`
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+- `PHASE_HANDOFF.md`
+
+**Tasks**:
+- [x] 新增 `scripts/e2e-portal-real-provider-stress.sh`：
+  - compose 启动真实 provider 模式（`CONTROL_PLANE_PROVIDER_MODE=real`）
+  - 执行多轮 `POST /api/runs/start` SSE 压测
+  - 统计 `succeeded/failed/blocked/transport_error/incomplete`
+  - 输出 JSON 报告到 `observability/reports/`
+  - 支持 `strict` 门禁（`STRESS_STRICT=1` + `STRESS_SUCCESS_RATE_THRESHOLD`）。
+- [x] 默认采用 non-strict 观测模式，避免本地凭据缺失时直接阻断迭代。
+- [x] 将压测报告目录加入 `.gitignore`（避免运行产物污染提交）。
+
+**Verification Criteria**:
+- [x] `bash scripts/e2e-portal-real-provider-stress.sh` 可执行并输出报告。
+- [x] `bash scripts/pre-commit-check.sh` 通过。
+
+**Exit Criteria**:
+- 具备真实 provider 稳定性“可测量”基线（成功率 + 失败画像），可作为下一阶段收敛输入。
+
+---
+
 ## 执行顺序
 1. Phase 8（已完成）
 2. Phase 9（已完成）
@@ -410,7 +440,8 @@
 11. Phase 18（进行中）
 12. Phase 19（进行中）
 13. Phase 20（进行中）
+14. Phase 21（进行中）
 
 ## 当前阶段
-- `in_progress`: Phase 20（Portal 真实后端 Smoke E2E）
-- `next_commit`: `test(phase-20): add portal real-backend smoke e2e`
+- `in_progress`: Phase 21（真实 Provider 压测基线与 Flaky 收敛）
+- `next_commit`: `test(phase-21): add real-provider stress baseline script`

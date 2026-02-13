@@ -1371,3 +1371,51 @@
 
 ### next_phase
 - Phase 21：真实 provider 模式下的 portal 对话压测（限流/超时/重连）与 flaky 收敛。
+
+---
+
+## Phase 21: 真实 Provider 压测基线与 Flaky 收敛（基线）
+
+### objective
+- 在真实 provider 模式（`CONTROL_PLANE_PROVIDER_MODE=real`）下建立稳定性压测基线，量化 run 成功率与失败画像，支撑后续收敛。
+
+### inputs
+- Phase 20 已具备 portal 真实后端 smoke，但仍使用 scripted provider 聚焦链路联通。
+- 用户已同意继续下一阶段，需要进入真实 provider 稳定性验证。
+
+### actions
+- 新增压测脚本 `scripts/e2e-portal-real-provider-stress.sh`：
+  - 启动 compose 服务并固定为 `CONTROL_PLANE_PROVIDER_MODE=real`
+  - 自动补齐 DB migration（001/002/003）
+  - 按轮次执行 `POST /api/runs/start` SSE 请求（可配置 provider/model/timeout/iterations）
+  - 解析流式事件并分类结果：`succeeded / failed / blocked / canceled / transport_error / incomplete`
+  - 生成 JSON 报告到 `observability/reports/phase21-provider-stress-*.json`
+  - 支持严格门禁：
+    - `STRESS_STRICT=1`
+    - `STRESS_SUCCESS_RATE_THRESHOLD=<0~1>`
+  - 默认 non-strict 观测模式（用于先采样再收敛）。
+- 更新 `.gitignore`，忽略 `observability/reports/` 运行产物，避免污染版本库。
+- 实跑基线脚本，获取真实 provider 在当前环境下的首批统计结果。
+
+### outputs
+- `.gitignore`
+- `scripts/e2e-portal-real-provider-stress.sh`
+- `REMAINING_DEVELOPMENT_TASKS.md`
+
+### validation
+- commands:
+  - `bash scripts/e2e-portal-real-provider-stress.sh`
+  - `bash scripts/pre-commit-check.sh`
+- results:
+  - 压测脚本执行完成并输出报告（当前环境 `codex-cli` 5/5 failed，error detail 一致，successRate=0）。
+  - 全仓 pre-commit 检查通过。
+
+### gate_result
+- **Pass**（真实 provider 稳定性基线已形成，具备可重复测量能力）
+
+### risks
+- 当前真实 provider 运行全部失败，说明仍存在环境依赖缺失/配置不完整（凭据、provider runtime 或运行参数）。
+- 基线阶段仅建立“测量能力与事实数据”，尚未实施针对性修复。
+
+### next_phase
+- Phase 21 后续子阶段：按失败画像逐项收敛（provider 凭据探测、启动前校验、失败可视化与自动降级策略）。
